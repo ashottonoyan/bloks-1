@@ -3,7 +3,7 @@
 // The one rule the whole shape follows: clients hold no transports. The
 // React app dispatches typed commands over HTTP and folds one SSE event
 // stream, and every provider process runs here.
-import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, watch, writeFileSync, renameSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -242,6 +242,20 @@ import { recall, recallText, type RecallSource } from "./recall.ts";
 import { noteBriefing, ProfileNotes } from "./profile-notes.ts";
 import { briefDue, composeBrief, parseBriefTime, type Brief, type BriefWaiting } from "./brief.ts";
 import { localDate } from "./usage.ts";
+import {
+  cleanWatcher,
+  describeFolderChanges,
+  folderChanges,
+  folderSnapshot,
+  hashOf,
+  mayFire,
+  newLines,
+  pageText,
+  parseFeed,
+  SETTLE_MS,
+  watcherTurn,
+  type Watcher,
+} from "./watchers.ts";
 import { MemoryJournal } from "./memory-journal.ts";
 import { Rehearsals, type Rehearsal } from "./rehearsals.ts";
 import { summarize, UsageStore } from "./usage.ts";
@@ -2669,6 +2683,217 @@ function sharedLaneFor(bot: BotRecord, blok: BlokRecord) {
   bloks.setLane(blok.id, bot.id, made.id);
   broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
   return store.bot(bot.id)!.tasks.find((t) => t.id === made.id)!;
+}
+
+// ── watchers (server/watchers.ts) ──────────────────────────────────────
+
+const WATCHERS_FILE = join(DATA_DIR, "watchers.json");
+let watchers: Watcher[] = (() => {
+  try {
+    const parsed = JSON.parse(readFileSync(WATCHERS_FILE, "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+})();
+function saveWatchers() {
+  try {
+    mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    writeFileSync(WATCHERS_FILE, JSON.stringify(watchers), { mode: 0o600 });
+  } catch {
+    /* kept in memory; written next time */
+  }
+}
+/** What a client sees: everything but the last look's contents. */
+const watcherView = ({ seen: _seen, seenItems: _items, ...rest }: Watcher) => rest;
+const folderWatches = new Map<string, import("node:fs").FSWatcher>();
+const settleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const checking = new Set<string>();
+
+function disarmWatcher(id: string) {
+  folderWatches.get(id)?.close();
+  folderWatches.delete(id);
+  clearTimeout(settleTimers.get(id));
+  settleTimers.delete(id);
+}
+
+/** A folder is watched by the filesystem, so a change is seen in seconds;
+ * the minute tick is only a fallback for events the filesystem drops. */
+function armWatcher(w: Watcher) {
+  disarmWatcher(w.id);
+  if (w.kind !== "folder" || !w.enabled) return;
+  try {
+    const fw = watch(w.target, { recursive: true }, () => {
+      clearTimeout(settleTimers.get(w.id));
+      // a folder still being written to is not finished changing
+      settleTimers.set(w.id, setTimeout(() => void checkWatcher(w.id), SETTLE_MS));
+    });
+    fw.on("error", () => disarmWatcher(w.id));
+    folderWatches.set(w.id, fw);
+  } catch (e) {
+    w.lastError = `cannot watch that folder: ${(e as Error).message}`;
+  }
+}
+
+async function fetchWatched(url: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: { "user-agent": "Bloks watcher (https://bloks.dev)", accept: "text/html,application/xhtml+xml,application/xml,application/rss+xml,application/atom+xml,*/*" },
+    signal: AbortSignal.timeout(20_000),
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error(`the address answered ${res.status}`);
+  const text = await res.text();
+  return text.slice(0, 2_000_000);
+}
+
+/** The lane a watcher's turns run in, made on first use. */
+function watcherLane(w: Watcher, bot: BotRecord) {
+  const known = w.laneId ? bot.tasks.find((t) => t.id === w.laneId) : undefined;
+  if (known) return known;
+  const active = bot.activeTaskId;
+  const made = store.createTask(bot.id, `Watching: ${w.name}`.slice(0, 40));
+  if (!made) throw new Error(`${bot.name} has too many tasks open for a watcher lane. Close one.`);
+  store.setActiveTask(bot.id, active);
+  w.laneId = made.id;
+  broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
+  return store.bot(bot.id)!.tasks.find((t) => t.id === made.id)!;
+}
+
+async function fireWatcher(w: Watcher, bot: BotRecord, what: string) {
+  const text = watcherTurn(w, what);
+  if (w.mode === "rehearse") {
+    await openRehearsals([bot], text, { quiet: true, via: "watcher" });
+  } else {
+    const lane = watcherLane(w, bot);
+    const said = store.appendMessage(lane.id, { role: "user", kind: "text", text, via: "watcher" });
+    broadcast({ kind: "message", threadId: lane.id, message: said });
+    await startTurn(bot.id, text, { taskId: lane.id, presetMessage: true });
+  }
+  w.fires = [{ at: Date.now(), summary: what.split("\n")[0].slice(0, 160) }, ...w.fires].slice(0, 10);
+}
+
+/**
+ * One look. The first only takes a baseline. A look while the agent is
+ * busy is skipped rather than taken, so the change is still there for
+ * the next one and the agent's own edits to a folder it is working in
+ * are not news to it.
+ */
+async function checkWatcher(id: string, manual = false): Promise<{ fired: boolean; note: string }> {
+  const w = watchers.find((x) => x.id === id);
+  if (!w) return { fired: false, note: "no such watcher" };
+  if (checking.has(id)) return { fired: false, note: "already looking" };
+  checking.add(id);
+  try {
+    const bot = store.bot(w.botId);
+    if (!bot || bot.archivedAt) throw new Error("its agent is gone or archived");
+    const lane = w.laneId ? bot.tasks.find((t) => t.id === w.laneId) : undefined;
+    if (lane?.busy || (w.kind === "folder" && bot.busy)) return { fired: false, note: `${bot.name} is working; it will look again shortly` };
+
+    let what: string | null = null;
+    if (w.kind === "folder") {
+      if (!existsSync(w.target)) throw new Error("the folder is not there any more");
+      const now = folderSnapshot(w.target);
+      if (w.seen) what = describeFolderChanges(folderChanges(JSON.parse(w.seen), now));
+      w.seen = JSON.stringify(now);
+    } else if (w.kind === "page") {
+      const text = pageText(await fetchWatched(w.target)).slice(0, 60_000);
+      if (w.seen !== undefined && hashOf(text) !== hashOf(w.seen)) {
+        const mentioned = !w.mentions || text.toLowerCase().includes(w.mentions.toLowerCase());
+        if (mentioned) {
+          const added = newLines(w.seen, text);
+          what = added.length ? added.map((line) => `+ ${line}`).join("\n") : "Some text was removed from the page.";
+        }
+      }
+      w.seen = text;
+    } else {
+      const items = parseFeed(await fetchWatched(w.target));
+      if (w.seenItems) {
+        const had = new Set(w.seenItems);
+        const fresh = items.filter((i) => !had.has(i.id)).slice(0, 5);
+        if (fresh.length) what = fresh.map((i) => `- ${i.title}${i.link ? ` (${i.link})` : ""}`).join("\n");
+      }
+      w.seenItems = [...new Set([...items.map((i) => i.id), ...(w.seenItems ?? [])])].slice(0, 400);
+    }
+    w.lastCheck = Date.now();
+    w.lastError = undefined;
+    let fired = false;
+    if (what) {
+      if (mayFire(w, Date.now())) {
+        await fireWatcher(w, bot, what);
+        fired = true;
+      } else {
+        w.lastError = "Held back: it already started six turns in the last hour.";
+      }
+    }
+    return { fired, note: fired ? "changed, and the agent is on it" : what ? w.lastError ?? "" : manual ? "no change since the last look" : "" };
+  } catch (e) {
+    w.lastError = (e as Error).message.slice(0, 200);
+    w.lastCheck = Date.now();
+    return { fired: false, note: w.lastError };
+  } finally {
+    checking.delete(id);
+    saveWatchers();
+    broadcast({ kind: "watchers" });
+  }
+}
+
+for (const w of watchers) armWatcher(w);
+// Pages and feeds on their own schedules; folders as a fallback.
+setInterval(() => {
+  const now = Date.now();
+  for (const w of watchers) {
+    if (!w.enabled) continue;
+    if ((w.lastCheck ?? 0) + w.every * 60_000 <= now) void checkWatcher(w.id);
+  }
+}, 60_000).unref?.();
+
+/**
+ * The same task, on a copy of the first agent's folder, by each of these
+ * agents (server/rehearsals.ts). Throws with a status when it cannot
+ * start. Used by the Rehearse button and by watchers set to rehearse.
+ */
+async function openRehearsals(bots: BotRecord[], text: string, opts: { quiet?: boolean; via?: Message["via"] } = {}) {
+  const dir = rehearsalDir(bots[0]);
+  if (!dir || !trackable(dir)) {
+    throw Object.assign(new Error(`${bots[0].name}'s folder cannot be rehearsed: it is missing, or it is a whole home folder.`), { status: 400 });
+  }
+  for (const b of bots) {
+    if (b.tasks.length >= MAX_TASKS + REHEARSAL_LANES) {
+      throw Object.assign(new Error(`${b.name} has too many lanes open. Close a finished rehearsal first.`), { status: 409 });
+    }
+  }
+  const short = text.replace(/\s+/g, " ").slice(0, 36);
+  let group: string | undefined;
+  const attempts: Array<{ id: string; botId: string; taskId: string }> = [];
+  for (const b of bots) {
+    const active = b.activeTaskId;
+    const task = store.createTask(b.id, `Rehearsal: ${short}`, REHEARSAL_LANES);
+    if (!task) throw Object.assign(new Error(`${b.name} has too many lanes open. Close a finished rehearsal first.`), { status: 409 });
+    // the one you asked stays in view in its new lane; the others keep
+    // yours, and so does everyone when nobody asked (a watcher)
+    if (b.id !== bots[0].id || opts.quiet) store.setActiveTask(b.id, active);
+    let r: Rehearsal;
+    try {
+      r = await rehearsals.open({ group, botId: b.id, taskId: task.id, dir, text });
+    } catch (e) {
+      store.deleteTask(b.id, task.id);
+      throw Object.assign(new Error(`The folder could not be copied: ${(e as Error).message}`), { status: 500 });
+    }
+    group = r.group;
+    store.pinTaskCwd(task.id, r.copy);
+    const said = store.appendMessage(task.id, { role: "user", kind: "text", text, ...(opts.via ? { via: opts.via } : {}) });
+    broadcast({ kind: "message", threadId: task.id, message: said });
+    broadcast({ kind: "bot", bot: clientBot(store.bot(b.id)) });
+    void startTurn(b.id, rehearsalBrief(r, text), { taskId: task.id, presetMessage: true, rehearsal: { dir, copy: r.copy } }).catch(async (e) => {
+      const notice = store.appendMessage(task.id, { role: "bot", kind: "notice", text: `The rehearsal could not start: ${(e as Error).message}` });
+      broadcast({ kind: "message", threadId: task.id, message: notice });
+      await rehearsals.settle(r.id, "failed");
+      broadcast({ kind: "rehearsals" });
+    });
+    attempts.push({ id: r.id, botId: b.id, taskId: task.id });
+  }
+  broadcast({ kind: "rehearsals" });
+  return { group, dir, attempts };
 }
 
 /**
@@ -5591,6 +5816,9 @@ const server = createServer(async (req, res) => {
       forgetIdentity(bot.id);
       proposals.removeForBot(bot.id);
       profileNotes.forgetSuggestionsBy(bot.id);
+      for (const w of watchers.filter((x) => x.botId === bot.id)) disarmWatcher(w.id);
+      watchers = watchers.filter((x) => x.botId !== bot.id);
+      saveWatchers();
       policy.removeForBot(bot.id);
       artifactComments.removeForBot(bot.id);
       projects.removeMember(bot.id);
@@ -6413,46 +6641,11 @@ const server = createServer(async (req, res) => {
       if (ids.length > 3) return json(res, 400, { error: "compare up to three agents at a time" });
       const bots = ids.map((id) => store.bot(id)).filter((b): b is BotRecord => Boolean(b && !b.hidden && !b.archivedAt));
       if (!bots.length || bots.length !== ids.length) return json(res, 404, { error: "no such agent" });
-      const dir = rehearsalDir(bots[0]);
-      if (!dir || !trackable(dir)) {
-        return json(res, 400, { error: `${bots[0].name}'s folder cannot be rehearsed: it is missing, or it is a whole home folder.` });
+      try {
+        return json(res, 201, await openRehearsals(bots, text));
+      } catch (e) {
+        return json(res, (e as { status?: number }).status ?? 500, { error: (e as Error).message });
       }
-      for (const b of bots) {
-        if (b.tasks.length >= MAX_TASKS + REHEARSAL_LANES) {
-          return json(res, 409, { error: `${b.name} has too many lanes open. Close a finished rehearsal first.` });
-        }
-      }
-      const short = text.replace(/\s+/g, " ").slice(0, 36);
-      let group: string | undefined;
-      const attempts: Array<{ id: string; botId: string; taskId: string }> = [];
-      for (const b of bots) {
-        const active = b.activeTaskId;
-        const task = store.createTask(b.id, `Rehearsal: ${short}`, REHEARSAL_LANES);
-        if (!task) return json(res, 409, { error: `${b.name} has too many lanes open. Close a finished rehearsal first.` });
-        // the one you asked stays in view in its new lane; the others keep yours
-        if (b.id !== bots[0].id) store.setActiveTask(b.id, active);
-        let r: Rehearsal;
-        try {
-          r = await rehearsals.open({ group, botId: b.id, taskId: task.id, dir, text });
-        } catch (e) {
-          store.deleteTask(b.id, task.id);
-          return json(res, 500, { error: `The folder could not be copied: ${(e as Error).message}` });
-        }
-        group = r.group;
-        store.pinTaskCwd(task.id, r.copy);
-        const said = store.appendMessage(task.id, { role: "user", kind: "text", text });
-        broadcast({ kind: "message", threadId: task.id, message: said });
-        broadcast({ kind: "bot", bot: clientBot(store.bot(b.id)) });
-        void startTurn(b.id, rehearsalBrief(r, text), { taskId: task.id, presetMessage: true, rehearsal: { dir, copy: r.copy } }).catch(async (e) => {
-          const notice = store.appendMessage(task.id, { role: "bot", kind: "notice", text: `The rehearsal could not start: ${(e as Error).message}` });
-          broadcast({ kind: "message", threadId: task.id, message: notice });
-          await rehearsals.settle(r.id, "failed");
-          broadcast({ kind: "rehearsals" });
-        });
-        attempts.push({ id: r.id, botId: b.id, taskId: task.id });
-      }
-      broadcast({ kind: "rehearsals" });
-      return json(res, 201, { group, dir, attempts });
     }
     // Every rehearsal, newest first, with what each attempt changed.
     if (method === "GET" && path === "/api/rehearsals") {
@@ -7671,6 +7864,62 @@ const server = createServer(async (req, res) => {
     // A linear scan over the in-memory message stores. At personal-app
     // scale that is thousands of rows, not millions; an index would be
     // more machinery than the data deserves.
+    // ── watchers ──
+    // An agent may file and drop its own watchers (a person saying "keep
+    // an eye on this page" in a chat is the common way one is made), and
+    // nobody else's.
+    if (method === "GET" && path === "/api/watchers") {
+      const mine = asAgent ? watchers.filter((w) => w.botId === asAgent.botId) : watchers;
+      return json(res, 200, { watchers: mine.map(watcherView) });
+    }
+    if (method === "POST" && path === "/api/watchers") {
+      const body = await readBody(req);
+      if (asAgent) body.botId = asAgent.botId;
+      const checked = cleanWatcher(body, (id) => Boolean(store.bot(id) && !store.bot(id)!.archivedAt));
+      if (!checked.ok) return json(res, 400, { error: checked.error });
+      if (watchers.length >= 50) return json(res, 409, { error: "fifty watchers is the limit" });
+      const w: Watcher = { id: newId(), ...checked.value, createdAt: Date.now(), fires: [] };
+      watchers.push(w);
+      saveWatchers();
+      armWatcher(w);
+      // the first look is the baseline, taken now so the next change counts
+      void checkWatcher(w.id);
+      broadcast({ kind: "watchers" });
+      return json(res, 201, { watcher: watcherView(w) });
+    }
+    m = path.match(/^\/api\/watchers\/([\w-]+)$/);
+    if (m && (method === "PATCH" || method === "DELETE")) {
+      const w = watchers.find((x) => x.id === m![1]);
+      if (!w || (asAgent && w.botId !== asAgent.botId)) return json(res, 404, { error: "no such watcher" });
+      if (method === "DELETE") {
+        disarmWatcher(w.id);
+        watchers = watchers.filter((x) => x.id !== w.id);
+        saveWatchers();
+        broadcast({ kind: "watchers" });
+        return json(res, 200, { ok: true });
+      }
+      const body = await readBody(req);
+      const checked = cleanWatcher({ ...w, ...body, botId: asAgent ? w.botId : (body.botId ?? w.botId) }, (id) => Boolean(store.bot(id)));
+      if (!checked.ok) return json(res, 400, { error: checked.error });
+      const moved = checked.value.target !== w.target || checked.value.kind !== w.kind;
+      Object.assign(w, checked.value);
+      if (moved) {
+        delete w.seen;
+        delete w.seenItems;
+      }
+      saveWatchers();
+      armWatcher(w);
+      if (moved && w.enabled) void checkWatcher(w.id);
+      broadcast({ kind: "watchers" });
+      return json(res, 200, { watcher: watcherView(w) });
+    }
+    m = path.match(/^\/api\/watchers\/([\w-]+)\/check$/);
+    if (m && method === "POST") {
+      const w = watchers.find((x) => x.id === m![1]);
+      if (!w || (asAgent && w.botId !== asAgent.botId)) return json(res, 404, { error: "no such watcher" });
+      return json(res, 200, await checkWatcher(w.id, true));
+    }
+
     // ── the morning brief ──
     if (method === "GET" && path === "/api/briefs") {
       return json(res, 200, {

@@ -34,6 +34,8 @@ import { Switch } from "@/components/ui/switch";
 import { JobBoard } from "./JobBoard";
 import { Workflows } from "./Workflows";
 import { cn } from "@/lib/cn";
+import { WatchersTab } from "./WatchersTab";
+import Eye from "lucide-react/dist/esm/icons/eye.mjs";
 import { thisComputer } from "@/lib/thisComputer";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
@@ -82,7 +84,7 @@ function addMonths(d: Date, n: number): Date {
 
 export function AutomationsPanel({ onClose }: { onClose: () => void }) {
   const { state } = useStore();
-  const [tab, setTab] = useState<"schedules" | "workflows" | "webhooks" | "jobs">("schedules");
+  const [tab, setTab] = useState<"schedules" | "watchers" | "workflows" | "webhooks" | "jobs">("schedules");
   const [routines, setRoutines] = useState<Routine[] | null>(null);
   const [mode, setMode] = useState<"day" | "week" | "month">("week");
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
@@ -259,6 +261,7 @@ export function AutomationsPanel({ onClose }: { onClose: () => void }) {
             {(
               [
                 ["schedules", "Schedules", <CalendarClock key="s" size={13} />],
+                ["watchers", "Watchers", <Eye key="e" size={13} />],
                 ["workflows", "Workflows", <Workflow key="f" size={13} />],
                 ["webhooks", "Webhooks", <Webhook key="w" size={13} />],
                 ["jobs", "Job board", <Briefcase key="j" size={13} />],
@@ -295,6 +298,8 @@ export function AutomationsPanel({ onClose }: { onClose: () => void }) {
         </div>
       ) : tab === "webhooks" ? (
         <WebhooksTab targetOf={targetOf} />
+      ) : tab === "watchers" ? (
+        <WatchersTab />
       ) : (
         <>
           {/* ── calendar controls ── */}

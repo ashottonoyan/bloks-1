@@ -349,6 +349,11 @@ function Bubble({
       {/* A column, so reactions hang under the bubble they belong to
           rather than beside it where they would push the text around. */}
       <div className={cn("flex max-w-[82%] flex-col sm:max-w-[68%]", user && "items-end")}>
+        {user && (message.via === "watcher" || message.via === "email") && (
+          <div className="mb-0.5 px-1 text-[11px] text-muted-foreground">
+            {message.via === "watcher" ? "From your watcher" : "By email"}
+          </div>
+        )}
         <div
           className={cn(
             "px-3.5 py-2 text-[14.5px] leading-relaxed",

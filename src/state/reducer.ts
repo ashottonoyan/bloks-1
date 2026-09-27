@@ -50,6 +50,8 @@ export interface Message {
   editedAt?: number;
   /** Taken back: the row stays, the words are gone. */
   deleted?: boolean;
+  /** Came in some other way than you typing it here. */
+  via?: "slack" | "discord" | "whatsapp" | "watcher" | "email";
   /** Rewound: taken back with everything after it (see the rewind route). */
   rewound?: number;
   /** secret messages: a value asked for via a secure field */

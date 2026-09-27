@@ -69,6 +69,38 @@ const COMMANDS = {
       return hits;
     },
   },
+  watch: {
+    use: 'watch --folder <path> | --page <url> | --feed <url> --do "<what to do when it changes>" [--name <name>] [--every <minutes>] [--mentions <text>] [--rehearse]',
+    about: "act when a folder, a web page or a feed changes",
+    run: (args) => {
+      const flags = parseFlags(args);
+      const kind = flags.folder ? "folder" : flags.page ? "page" : flags.feed ? "feed" : null;
+      if (!kind) throw new Error("watch needs --folder, --page or --feed");
+      if (!flags.do) throw new Error('watch needs --do "what to do when it changes"');
+      return request("POST", "/api/watchers", {
+        kind,
+        target: flags[kind],
+        instruction: flags.do,
+        name: flags.name,
+        every: flags.every ? Number(flags.every) : undefined,
+        mentions: flags.mentions,
+        mode: flags.rehearse ? "rehearse" : "act",
+      });
+    },
+  },
+  watchers: {
+    use: "watchers",
+    about: "your watchers, and when each last fired",
+    run: async () => (await request("GET", "/api/watchers")).watchers,
+  },
+  unwatch: {
+    use: "unwatch <watcher-id>",
+    about: "stop one of your watchers",
+    run: (args) => {
+      if (!args[0]) throw new Error("unwatch needs a watcher id");
+      return request("DELETE", `/api/watchers/${args[0]}`);
+    },
+  },
   note: {
     use: 'note "<one short fact about the person>"',
     about: "suggest a lasting note about the person you work for; they decide whether to keep it",

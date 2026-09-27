@@ -320,7 +320,7 @@ export function cliBriefing(command: string): string {
   return [
     `You can act on this workspace yourself, not only describe what should happen. Run \`${command} help\` to see how.`,
     "Use it when you have decided something needs doing: hiring a teammate, opening a room, filing a routine, posting a job, saying something to another agent.",
-    `When something may have come up before (a decision, a name, a preference), \`${command} recall <words>\` searches your past conversations.`,
+    "Its `recall <words>` searches your past conversations when something may have come up before.",
     "It answers JSON. Your credential is already in the environment and only lasts this turn.",
   ].join(" ");
 }

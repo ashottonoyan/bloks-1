@@ -1772,10 +1772,12 @@ describe("workspace memory and working folders", () => {
 });
 
 describe("agent voices", () => {
-  test("without keys the catalog is honest about it", async () => {
+  test("without keys the catalog is honest about it: only the Mac's own voices", async () => {
     const r = await h.json("/api/speech/voices");
-    assert.deepEqual(r.configured, { elevenlabs: false, openai: false });
-    assert.deepEqual(r.voices, []);
+    const mac = process.platform === "darwin";
+    assert.deepEqual(r.configured, { elevenlabs: false, openai: false, system: mac });
+    assert.ok(r.voices.every((v: any) => v.provider === "system"), "no paid voice without its key");
+    if (!mac) assert.deepEqual(r.voices, []);
   });
 
   test("discovered-key consent persists as a boolean and never invents a key", async () => {

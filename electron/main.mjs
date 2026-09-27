@@ -731,6 +731,41 @@ ipcMain.handle("badge:set", (event, value) => {
 // updater itself runs on its own (see the whenReady block); these exist
 // so a person can ask instead of waiting.
 
+/**
+ * Which kind of trouble an updater error is, so the About card can say
+ * something true. A download or install that fails after the check went
+ * through is not "didn't reach the server", and saying so sends people
+ * looking at their wifi.
+ */
+function updateTrouble(message) {
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|net::ERR_|socket hang up|getaddrinfo/i.test(message)) {
+    return "offline";
+  }
+  if (/latest-mac\.yml|ERR_UPDATER_(LATEST_VERSION_NOT_FOUND|CHANNEL_FILE_NOT_FOUND|NO_PUBLISHED_VERSIONS)|\b(403|429)\b|rate limit/i.test(message)) {
+    return "server";
+  }
+  return "install";
+}
+
+/** Updater lines to ~/Library/Logs/Bloks/updater.log, trimmed at 1 MB. */
+function updaterLogger() {
+  const file = path.join(app.getPath("logs"), "updater.log");
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (fs.statSync(file, { throwIfNoEntry: false })?.size > 1_000_000) fs.rmSync(file);
+  } catch {
+    // no log is better than no updater
+  }
+  const write = (level) => (...parts) => {
+    try {
+      fs.appendFileSync(file, `${new Date().toISOString()} ${level} ${parts.map(String).join(" ")}\n`);
+    } catch {
+      // same
+    }
+  };
+  return { info: write("info"), warn: write("warn"), error: write("error"), debug: write("debug") };
+}
+
 /** The last thing the updater said, replayed to windows that ask. */
 let updaterState = { state: "idle" };
 
@@ -912,9 +947,14 @@ app.whenReady().then(async () => {
       tellWindows("downloading", { percent: Math.round(progress?.percent ?? 0) }),
     );
     autoUpdater.on("update-downloaded", (info) => tellWindows("ready", { version: info?.version }));
+    // A Finder launch sends stdout to /dev/null, so the updater writes its
+    // own log. Without it a failed update leaves nothing to read afterwards.
+    autoUpdater.logger = updaterLogger();
     autoUpdater.on("error", (error) => {
-      console.error("[updater]", error?.message ?? error);
-      tellWindows("error");
+      const message = String(error?.message ?? error);
+      console.error("[updater]", message);
+      autoUpdater.logger.error(message);
+      tellWindows("error", { reason: updateTrouble(message) });
     });
     autoUpdater.checkForUpdatesAndNotify().catch(() => {});
   }

@@ -12,6 +12,8 @@ export interface UpdateState {
   state: "idle" | "checking" | "downloading" | "current" | "ready" | "error" | "dev";
   version?: string;
   percent?: number;
+  /** For an error: the network, GitHub's side, or the install itself. */
+  reason?: "offline" | "server" | "install";
 }
 
 export interface CuaPermissions {

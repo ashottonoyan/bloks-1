@@ -57,6 +57,7 @@ export function ChatSection() {
       <PlatformCard platform="slack" status={status.slack} onChange={setStatus} />
       <PlatformCard platform="discord" status={status.discord} onChange={setStatus} />
       <WhatsAppCard status={status.whatsapp} onChange={setStatus} />
+      <EmailCard />
     </>
   );
 }
@@ -293,6 +294,101 @@ function WhatsAppCard({ status, onChange }: { status: WhatsAppStatus; onChange: 
         </>
       )}
 
+      {error && <div className="mt-2 text-[11.5px] text-warning">{error}</div>}
+    </div>
+  );
+}
+
+interface EmailStatus {
+  enabled: boolean;
+  cloud: boolean;
+  allowFrom: string[];
+  addresses: Array<{ botId: string; name: string; address: string | null }>;
+}
+
+/** Each agent's own address, through Bloks Cloud (server "email your
+ * agent"). Mail to it becomes a turn; the agent's answer is the reply. */
+function EmailCard() {
+  const [status, setStatus] = useState<EmailStatus | null>(null);
+  const [allow, setAllow] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api("/api/chat/email")
+      .then((r: EmailStatus) => {
+        setStatus(r);
+        setAllow(r.allowFrom.join(", "));
+      })
+      .catch(() => setStatus(null));
+  }, []);
+  if (!status) return null;
+  const patch = (body: Record<string, unknown>) => {
+    setBusy(true);
+    setError(null);
+    api("/api/chat/email", { method: "PATCH", body: JSON.stringify(body) })
+      .then((r: EmailStatus) => {
+        setStatus(r);
+        setAllow(r.allowFrom.join(", "));
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="mt-4 rounded-2xl border bg-card p-4">
+      <div className="flex items-center justify-between">
+        <div className="min-w-0 pr-3">
+          <div className="text-[13.5px] font-semibold text-foreground">Email</div>
+          <div className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">
+            Give every agent an email address. Forward it an invoice, a newsletter or a thread and it gets to work; what
+            it says back is emailed as the reply.
+          </div>
+        </div>
+        <Switch
+          checked={status.enabled}
+          disabled={busy || (!status.cloud && !status.enabled)}
+          onCheckedChange={(on) => patch({ enabled: on })}
+          aria-label="Email"
+        />
+      </div>
+      {!status.cloud && !status.enabled && (
+        <div className="mt-3 rounded-lg bg-muted/60 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground">
+          Needs Bloks Cloud: mail reaches this computer through it. Turn it on in Settings, Devices.
+        </div>
+      )}
+      {status.enabled && (
+        <>
+          <div className="mt-3 space-y-2">
+            {status.addresses.map((a) =>
+              a.address ? <CopyRow key={a.botId} label={a.name} value={a.address} /> : null,
+            )}
+          </div>
+          <div className="mt-3 border-t pt-3">
+            <div className="text-[12px] text-muted-foreground">
+              Who may write. Leave it empty and anyone with an address can; list addresses or @domains to allow only them.
+            </div>
+            <div className="mt-1.5 flex gap-2">
+              <Input
+                value={allow}
+                onChange={(e) => setAllow(e.target.value)}
+                placeholder="you@example.com, @yourcompany.com"
+                className="h-8 text-[12.5px]"
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => patch({ allowFrom: allow.split(/[\s,]+/).filter(Boolean) })}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+          <div className="mt-3 rounded-lg bg-muted/60 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground">
+            Mail passes through Bloks Cloud readable, because email arrives that way; nothing is kept on the way. An agent
+            can only reply to someone who wrote to it.
+          </div>
+        </>
+      )}
       {error && <div className="mt-2 text-[11.5px] text-warning">{error}</div>}
     </div>
   );

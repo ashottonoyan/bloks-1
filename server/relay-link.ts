@@ -329,6 +329,39 @@ export class RelayLink {
     return body.url;
   }
 
+  /** This computer's part of every agent's email address, made once by
+   * Bloks Cloud and kept. */
+  async mailId(): Promise<{ id: string; domain: string }> {
+    if (!this.config) throw new Error("Turn on Bloks Cloud first: email reaches this computer through it.");
+    const res = await fetch(`${this.config.url}/space/agent/hook`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ platform: "email" }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as { id?: unknown; domain?: unknown; error?: unknown };
+    if (!res.ok || typeof body.id !== "string" || typeof body.domain !== "string") {
+      throw new Error(typeof body.error === "string" ? body.error : "Bloks Cloud could not make an email address.");
+    }
+    return { id: body.id, domain: body.domain };
+  }
+
+  /** An agent's reply to somebody who emailed it. Bloks Cloud checks that
+   * they wrote in, and sends it. */
+  async sendEmail(mail: { to: string; replyTo: string; fromName: string; subject: string; text: string; inReplyTo?: string }): Promise<void> {
+    if (!this.config) throw new Error("Bloks Cloud is off");
+    const res = await fetch(`${this.config.url}/space/agent/email`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify(mail),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: unknown };
+      throw new Error(typeof body.error === "string" ? body.error : `the reply was not sent (${res.status})`);
+    }
+  }
+
   private headers(): Record<string, string> {
     return {
       authorization: `Bearer ${this.config!.agentToken}`,

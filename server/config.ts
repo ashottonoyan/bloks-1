@@ -90,6 +90,10 @@ export interface AppConfig {
       webhookUrl?: string;
       enabled?: boolean;
     };
+    /** Mail to <agent>.<id>@agents.bloks.dev, through Bloks Cloud. `id` is
+     * this computer's part of every address; `allowFrom` limits who can
+     * write (addresses, or @domain), empty meaning anyone who has one. */
+    email?: { enabled?: boolean; id?: string; domain?: string; allowFrom?: string[] };
   };
   /** Reaching agents from a phone over Telegram. The token is a
    * credential, so it lives here with the rest of them. */

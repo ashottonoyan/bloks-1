@@ -1593,6 +1593,8 @@ bus.subscribe((event: RuntimeEvent) => {
         for (const [item, id] of toolMessageByItem) if (id === settled.id) toolMessageByItem.delete(item);
       }
       fallBackIfOut(bot, event.threadId, roomId, event.ok !== false, event.stopReason ?? null);
+      replyByMail(event.threadId, event.ok !== false);
+      if (mailQueue.length) setTimeout(() => void drainMail(), 0);
       // whatever the agent was given to act with is spent
       agentTokens.revokeTask(event.threadId);
       store.patchBot(bot.id, { unread: true });
@@ -3432,7 +3434,7 @@ const relayLink = new RelayLink(PORT, (state) => broadcast({ kind: "relay", ...s
 // invite's envelope key comes from the invite's own secret.
 relayLink.memberFrame = (frame, personId) => memberFrame(frame, (roomId) => viewOf(personId, roomId));
 relayLink.previewOf = previewOf;
-relayLink.onHook = (hook) => onWhatsAppHook(hook);
+relayLink.onHook = (hook) => (hook.platform === "email" ? onEmailHook(hook) : onWhatsAppHook(hook));
 relayLink.pairSecret = (linkId) => pairLinkSecret(linkId);
 relayLink.pairClaim = (linkId, body) => {
   const b = (body ?? {}) as { name?: unknown; tokenHash?: unknown };
@@ -4514,6 +4516,131 @@ async function onWhatsAppHook(hook: { platform: string; body: string; signature:
 }
 /** WhatsApp message ids already handled. */
 const whatsappSeen = new Set<string>();
+
+// ── email your agent ───────────────────────────────────────────────────
+// Mail to <agent>.<id>@agents.bloks.dev arrives through Bloks Cloud (the
+// site reads it, the relay passes it here). The name before the dot picks
+// the agent; the id after it is this computer's. It becomes a turn in the
+// agent's Email lane, and what the agent says back goes out as the reply.
+
+interface InboundMail {
+  to: string;
+  from: string;
+  fromName: string;
+  subject: string;
+  text: string;
+  messageId: string;
+}
+const mailSeen = new Set<string>();
+/** Mail waiting for its agent's Email lane to be free. */
+const mailQueue: Array<{ botId: string; mail: InboundMail }> = [];
+/** The mail each Email lane is answering, for the reply. */
+const mailAnswering = new Map<string, { botId: string; mail: InboundMail; until?: number }>();
+
+/** The part of an address that names an agent: lowercase letters, digits
+ * and dashes, from its name. */
+function mailName(name: string): string {
+  return name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 30) || "agent";
+}
+
+function mailAddressOf(bot: BotRecord): string | null {
+  const c = cfg.chat?.email;
+  if (!c?.enabled || !c.id) return null;
+  return `${mailName(bot.name)}.${c.id}@${c.domain ?? "agents.bloks.dev"}`;
+}
+
+function mayMail(from: string): boolean {
+  const allow = (cfg.chat?.email?.allowFrom ?? []).map((a) => a.trim().toLowerCase()).filter(Boolean);
+  if (!allow.length) return true;
+  const address = from.toLowerCase();
+  return allow.some((a) => (a.startsWith("@") ? address.endsWith(a) : address === a));
+}
+
+async function onEmailHook(hook: { platform: string; body: string }): Promise<number> {
+  const c = cfg.chat?.email;
+  if (!c?.enabled || !c.id) return 404;
+  let mail: InboundMail;
+  try {
+    mail = JSON.parse(hook.body);
+  } catch {
+    return 400;
+  }
+  const local = String(mail.to ?? "").toLowerCase().split("@")[0] ?? "";
+  if (!local.endsWith(`.${c.id}`)) return 404;
+  const name = local.slice(0, -(c.id.length + 1));
+  const bot = store.bots.find((b) => !b.archivedAt && !b.hidden && mailName(b.name) === name);
+  if (!bot) return 404;
+  if (!mayMail(String(mail.from ?? ""))) return 403;
+  if (mail.messageId) {
+    if (mailSeen.has(mail.messageId)) return 202;
+    mailSeen.add(mail.messageId);
+    if (mailSeen.size > 4_000) for (const id of [...mailSeen].slice(0, 2_000)) mailSeen.delete(id);
+  }
+  mailQueue.push({ botId: bot.id, mail });
+  void drainMail();
+  return 202;
+}
+
+/** Starts a turn for each waiting mail whose agent's Email lane is free. */
+async function drainMail() {
+  for (const item of [...mailQueue]) {
+    const laneId = backgroundTaskId(item.botId, "Email");
+    if (!laneId) continue;
+    mailQueue.splice(mailQueue.indexOf(item), 1);
+    const { mail } = item;
+    const text = [
+      `An email from ${mail.fromName && mail.fromName !== mail.from ? `${mail.fromName} <${mail.from}>` : mail.from}${mail.subject ? `, subject "${mail.subject}"` : ""}:`,
+      "",
+      mail.text || "(no text)",
+      "",
+      "What you say back is emailed to them as your reply, so write it as an email: no preamble about this being a reply.",
+    ].join("\n");
+    const said = store.appendMessage(laneId, { role: "user", kind: "text", text, via: "email" });
+    broadcast({ kind: "message", threadId: laneId, message: said });
+    mailAnswering.set(laneId, item);
+    await startTurn(item.botId, text, { taskId: laneId, presetMessage: true }).catch((e) => {
+      mailAnswering.delete(laneId);
+      const notice = store.appendMessage(laneId, { role: "bot", kind: "notice", text: `The email could not be answered: ${(e as Error).message}` });
+      broadcast({ kind: "message", threadId: laneId, message: notice });
+    });
+  }
+}
+setInterval(() => void drainMail(), 30_000).unref?.();
+
+/** The end of an Email lane's turn: what the agent said goes back. */
+function replyByMail(laneId: string, ok: boolean) {
+  const answering = mailAnswering.get(laneId);
+  if (!answering) return;
+  if (answering.until && answering.until < Date.now()) return void mailAnswering.delete(laneId);
+  // a failed turn may still be answered by a backup engine's retry, so the
+  // mail waits a little for it rather than going unanswered
+  if (!ok) {
+    answering.until = Date.now() + 10 * 60_000;
+    return;
+  }
+  mailAnswering.delete(laneId);
+  const bot = store.bot(answering.botId);
+  const address = bot ? mailAddressOf(bot) : null;
+  const said = lastSaid(laneId);
+  if (!bot || !address || !ok || !said) return;
+  const subject = answering.mail.subject ? (/^re:/i.test(answering.mail.subject) ? answering.mail.subject : `Re: ${answering.mail.subject}`) : "A reply from your agent";
+  void relayLink
+    .sendEmail({ to: answering.mail.from, replyTo: address, fromName: bot.name, subject, text: said, inReplyTo: answering.mail.messageId || undefined })
+    .then(() => {
+      const notice = store.appendMessage(laneId, { role: "bot", kind: "notice", text: `Emailed to ${answering.mail.from}.` });
+      broadcast({ kind: "message", threadId: laneId, message: notice });
+    })
+    .catch((e) => {
+      const notice = store.appendMessage(laneId, { role: "bot", kind: "notice", text: `The reply was not emailed: ${(e as Error).message}` });
+      broadcast({ kind: "message", threadId: laneId, message: notice });
+    });
+}
 
 /** What the settings screen sees. Tokens never come back out, only
  * whether they are set; WhatsApp's webhook address and verify token do,
@@ -7930,6 +8057,44 @@ const server = createServer(async (req, res) => {
     // A linear scan over the in-memory message stores. At personal-app
     // scale that is thousands of rows, not millions; an index would be
     // more machinery than the data deserves.
+    // ── email your agent ──
+    if (path === "/api/chat/email" && (method === "GET" || method === "PATCH")) {
+      if (asAgent) return json(res, 403, { error: "that is the person's setting" });
+      if (method === "PATCH") {
+        const body = await readBody(req);
+        const next = { ...(cfg.chat?.email ?? {}) };
+        if (Array.isArray(body.allowFrom)) {
+          next.allowFrom = (body.allowFrom as unknown[])
+            .map((a) => String(a).trim().toLowerCase())
+            .filter((a) => /^(@[^\s@]+\.[^\s@]+|[^\s@]+@[^\s@]+\.[^\s@]+)$/.test(a))
+            .slice(0, 50);
+        }
+        if (typeof body.enabled === "boolean") {
+          next.enabled = body.enabled;
+          if (body.enabled && !next.id) {
+            try {
+              const made = await relayLink.mailId();
+              next.id = made.id;
+              next.domain = made.domain;
+            } catch (e) {
+              return json(res, 409, { error: (e as Error).message });
+            }
+          }
+        }
+        cfg.chat = { ...(cfg.chat ?? {}), email: next };
+        saveConfig({ chat: cfg.chat });
+      }
+      const c = cfg.chat?.email;
+      return json(res, 200, {
+        enabled: Boolean(c?.enabled && c.id),
+        cloud: Boolean(cfg.relay?.enabled && cfg.relay.agentToken),
+        allowFrom: c?.allowFrom ?? [],
+        addresses: store.bots
+          .filter((b) => !b.hidden && !b.archivedAt)
+          .map((b) => ({ botId: b.id, name: b.name, address: mailAddressOf(b) })),
+      });
+    }
+
     // ── watchers ──
     // An agent may file and drop its own watchers (a person saying "keep
     // an eye on this page" in a chat is the common way one is made), and

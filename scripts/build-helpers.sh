@@ -24,9 +24,15 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 for helper in speech-helper perm-helper auth-helper; do
+  # The speech helper hears the Mac's own sound for meeting notes through
+  # ScreenCaptureKit, which exists from macOS 12.3. Linked weakly, so the
+  # helper still starts on 11 and simply goes without it there.
+  extra=()
+  if [ "$helper" = speech-helper ]; then extra=(-Xlinker -weak_framework -Xlinker ScreenCaptureKit); fi
   for arch in arm64 x86_64; do
     swiftc -O \
       -target "$arch-apple-macos11.0" \
+      ${extra[@]+"${extra[@]}"} \
       "$out/$helper.swift" \
       -o "$tmp/$helper.$arch"
   done

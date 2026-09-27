@@ -83,7 +83,7 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    NSMicrophoneUsageDescription: Bloks uses the microphone for voice dictation into the composer.
+    NSMicrophoneUsageDescription: Bloks uses the microphone for voice dictation, calls with your agents, and meeting notes. Speech is transcribed on this Mac.
     NSSpeechRecognitionUsageDescription: Bloks transcribes your voice on-device to type messages for you.
   # Notarization is on. electron-builder reads APPLE_ID,
   # APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID from the environment,

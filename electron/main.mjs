@@ -46,7 +46,7 @@ import electronUpdater from "./vendor/electron-updater.cjs";
 
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
 import { nativeHelper } from "./native-helper.mjs";
-import { startSpeech, stopSpeech } from "./speech.mjs";
+import { startMeeting, startSpeech, stopMeeting, stopSpeech } from "./speech.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_ICON = path.join(HERE, "resources/app-icon.png");
@@ -815,6 +815,11 @@ ipcMain.handle("speech:start", (event) => {
   if (win) startSpeech(win);
 });
 ipcMain.handle("speech:stop", () => stopSpeech());
+ipcMain.handle("meeting:start", (event, options) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) startMeeting(win, { system: Boolean(options?.system) });
+});
+ipcMain.handle("meeting:stop", () => stopMeeting());
 
 // ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -1046,7 +1051,10 @@ ipcMain.handle("remote:disconnect", () => {
 });
 
 // The system keeps handing us these keys until we say otherwise.
-app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+  stopMeeting();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

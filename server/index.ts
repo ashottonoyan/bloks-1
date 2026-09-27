@@ -243,6 +243,7 @@ import { noteBriefing, ProfileNotes } from "./profile-notes.ts";
 import { briefDue, composeBrief, parseBriefTime, type Brief, type BriefWaiting } from "./brief.ts";
 import { localDate } from "./usage.ts";
 import { engineReport, TurnLogStore, type Outcome, type TurnLog } from "./engine-report.ts";
+import { actionItems, cleanSegment, MAX_SEGMENTS, notesPrompt, transcriptOf, type Meeting } from "./meetings.ts";
 import {
   cleanWatcher,
   describeFolderChanges,
@@ -1594,6 +1595,7 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       fallBackIfOut(bot, event.threadId, roomId, event.ok !== false, event.stopReason ?? null);
       replyByMail(event.threadId, event.ok !== false);
+      collectMeetingItems(event.threadId, event.ok !== false);
       if (mailQueue.length) setTimeout(() => void drainMail(), 0);
       // whatever the agent was given to act with is spent
       agentTokens.revokeTask(event.threadId);
@@ -2750,6 +2752,39 @@ function sharedLaneFor(bot: BotRecord, blok: BlokRecord) {
   bloks.setLane(blok.id, bot.id, made.id);
   broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
   return store.bot(bot.id)!.tasks.find((t) => t.id === made.id)!;
+}
+
+// ── meeting notes (server/meetings.ts) ─────────────────────────────────
+
+const MEETINGS_FILE = join(DATA_DIR, "meetings.json");
+let meetings: Meeting[] = (() => {
+  try {
+    const parsed = JSON.parse(readFileSync(MEETINGS_FILE, "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+})();
+function saveMeetings() {
+  try {
+    mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    writeFileSync(MEETINGS_FILE, JSON.stringify(meetings.slice(-50)), { mode: 0o600 });
+  } catch {
+    /* kept in memory */
+  }
+}
+/** Lanes writing up a meeting, so the end of the turn collects the items. */
+const meetingLanes = new Map<string, string>();
+
+function collectMeetingItems(laneId: string, ok: boolean) {
+  const id = meetingLanes.get(laneId);
+  if (!id) return;
+  meetingLanes.delete(laneId);
+  const meeting = meetings.find((m) => m.id === id);
+  if (!meeting || !ok) return;
+  meeting.items = actionItems(lastSaid(laneId), store.bots.filter((b) => !b.archivedAt).map((b) => ({ id: b.id, name: b.name })));
+  saveMeetings();
+  broadcast({ kind: "meetings" });
 }
 
 // ── watchers (server/watchers.ts) ──────────────────────────────────────
@@ -8057,6 +8092,99 @@ const server = createServer(async (req, res) => {
     // A linear scan over the in-memory message stores. At personal-app
     // scale that is thousands of rows, not millions; an index would be
     // more machinery than the data deserves.
+    // ── meeting notes ──
+    if (method === "GET" && path === "/api/meetings") {
+      if (asAgent) return json(res, 403, { error: "that is the person's" });
+      return json(res, 200, {
+        meetings: [...meetings].reverse().map(({ segments, ...m }) => ({ ...m, heard: segments.length })),
+      });
+    }
+    if (method === "POST" && path === "/api/meetings") {
+      if (asAgent) return json(res, 403, { error: "that is the person's" });
+      const body = await readBody(req);
+      const bot = typeof body.botId === "string" ? store.bot(body.botId) : null;
+      if (!bot || bot.archivedAt) return json(res, 404, { error: "no such agent" });
+      const meeting: Meeting = {
+        id: newId(),
+        botId: bot.id,
+        title: String(body.title ?? "").trim().slice(0, 100),
+        startedAt: Date.now(),
+        segments: [],
+        system: body.system === true,
+      };
+      meetings.push(meeting);
+      saveMeetings();
+      broadcast({ kind: "meetings" });
+      return json(res, 201, { meeting });
+    }
+    m = path.match(/^\/api\/meetings\/([\w-]+)(?:\/(segments|end))?$/);
+    if (m && (method === "GET" || method === "POST" || method === "DELETE")) {
+      if (asAgent) return json(res, 403, { error: "that is the person's" });
+      const meeting = meetings.find((x) => x.id === m![1]);
+      if (!meeting) return json(res, 404, { error: "no such meeting" });
+      if (method === "GET" && !m[2]) return json(res, 200, { meeting });
+      if (method === "DELETE" && !m[2]) {
+        meetings = meetings.filter((x) => x.id !== meeting.id);
+        saveMeetings();
+        broadcast({ kind: "meetings" });
+        return json(res, 200, { ok: true });
+      }
+      if (method === "POST" && m[2] === "segments") {
+        if (meeting.laneId) return json(res, 409, { error: "that meeting has ended" });
+        const body = await readBody(req);
+        const added = (Array.isArray(body.segments) ? body.segments : [])
+          .map((raw: unknown) => cleanSegment(raw))
+          .filter((x: unknown): x is NonNullable<ReturnType<typeof cleanSegment>> => x !== null);
+        meeting.segments = [...meeting.segments, ...added].slice(-MAX_SEGMENTS);
+        saveMeetings();
+        return json(res, 200, { heard: meeting.segments.length });
+      }
+      if (method === "POST" && m[2] === "end") {
+        if (meeting.laneId) return json(res, 409, { error: "that meeting has already been written up" });
+        const bot = store.bot(meeting.botId);
+        if (!bot) return json(res, 404, { error: "its agent is gone" });
+        // ended when the person pressed stop, even if the write-up waits
+        meeting.endedAt = meeting.endedAt ?? Date.now();
+        saveMeetings();
+        const laneId = backgroundTaskId(bot.id, "Meetings");
+        if (!laneId) return json(res, 409, { error: `${bot.name} is busy in every lane. Try again when it is free.` });
+        meeting.laneId = laneId;
+        saveMeetings();
+        const person = cfg.profile?.name?.trim() || "You";
+        const transcript = transcriptOf(meeting.segments, { you: person, them: "Them" });
+        const team = store.bots.filter((b) => !b.hidden && !b.archivedAt).map((b) => b.name);
+        const minutes = Math.max(1, Math.round((meeting.endedAt! - meeting.startedAt) / 60_000));
+        const shown = store.appendMessage(laneId, {
+          role: "user",
+          kind: "text",
+          text: `Notes from ${meeting.title ? `"${meeting.title}"` : "my meeting"}, ${minutes} minute${minutes === 1 ? "" : "s"}, please. The transcript is attached.`,
+        });
+        broadcast({ kind: "message", threadId: laneId, message: shown });
+        meetingLanes.set(laneId, meeting.id);
+        void startTurn(bot.id, notesPrompt(meeting, transcript, team, person), { taskId: laneId, presetMessage: true }).catch((e) => {
+          meetingLanes.delete(laneId);
+          const notice = store.appendMessage(laneId, { role: "bot", kind: "notice", text: `The notes could not be written: ${(e as Error).message}` });
+          broadcast({ kind: "message", threadId: laneId, message: notice });
+        });
+        broadcast({ kind: "meetings" });
+        return json(res, 200, { meeting: { ...meeting, segments: undefined }, laneId });
+      }
+    }
+    m = path.match(/^\/api\/meetings\/([\w-]+)\/items\/(\d+)\/send$/);
+    if (m && method === "POST") {
+      if (asAgent) return json(res, 403, { error: "that is the person's" });
+      const meeting = meetings.find((x) => x.id === m![1]);
+      const item = meeting?.items?.[Number(m[2])];
+      if (!meeting || !item) return json(res, 404, { error: "no such action item" });
+      if (!item.botId || !store.bot(item.botId)) return json(res, 400, { error: `${item.owner} is not one of your agents` });
+      if (item.sentAt) return json(res, 409, { error: "already handed over" });
+      await sendUserMessage(item.botId, `From the meeting${meeting.title ? ` "${meeting.title}"` : ""}: ${item.text}`);
+      item.sentAt = Date.now();
+      saveMeetings();
+      broadcast({ kind: "meetings" });
+      return json(res, 200, { item });
+    }
+
     // ── email your agent ──
     if (path === "/api/chat/email" && (method === "GET" || method === "PATCH")) {
       if (asAgent) return json(res, 403, { error: "that is the person's setting" });

@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld("bloks", {
   pendingLink: () => ipcRenderer.invoke("link:pending"),
   speechStart: () => ipcRenderer.invoke("speech:start"),
   speechStop: () => ipcRenderer.invoke("speech:stop"),
+  // meeting notes: the helper's long-running mode (electron/speech.mjs)
+  meetingStart: (options) => ipcRenderer.invoke("meeting:start", options),
+  meetingStop: () => ipcRenderer.invoke("meeting:stop"),
+  onMeetingLine: subscription("meeting:line"),
+  onMeetingEnd: subscription("meeting:end"),
   onSpeechTranscript: subscription("speech:transcript"),
   onSpeechEnd: subscription("speech:end"),
 

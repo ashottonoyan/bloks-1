@@ -352,6 +352,8 @@ export interface AppState {
   rehearsalsOpen: boolean;
   /** The morning brief panel (BriefPanel). */
   briefOpen: boolean;
+  /** The agent taking meeting notes, while its panel is open. */
+  meetingFor: string | null;
   rehearsalsTick: number;
   /** Bumped when the server says a kind of thing changed (notes about
    * you, briefs, watchers, meetings), so whatever shows it re-reads. */
@@ -441,6 +443,7 @@ export type Action =
   | { type: "rehearsalsChanged" }
   | { type: "tick"; key: string }
   | { type: "toggleBrief"; open?: boolean }
+  | { type: "openMeeting"; botId: string | null }
   | { type: "openProject"; id: string | null }
   | {
       type: "updateBot";
@@ -566,6 +569,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, rehearsalsOpen: action.open ?? !state.rehearsalsOpen };
     case "rehearsalsChanged":
       return { ...state, rehearsalsTick: state.rehearsalsTick + 1 };
+    case "openMeeting":
+      return { ...state, meetingFor: action.botId };
     case "toggleBrief":
       return { ...state, briefOpen: action.open ?? !state.briefOpen };
     case "tick":
@@ -844,6 +849,7 @@ export const initialState: AppState = {
   memoryBotId: null,
   rehearsalsOpen: false,
   briefOpen: false,
+  meetingFor: null,
   rehearsalsTick: 0,
   ticks: {},
   teamLink: null,

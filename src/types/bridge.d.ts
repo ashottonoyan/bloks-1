@@ -54,6 +54,13 @@ declare global {
         avatar?: string;
       }): Promise<void>;
       onNotifyActivate(handler: (payload: { target: string }) => void): () => void;
+      /** Meeting notes: long-running on-device transcription. */
+      meetingStart?(options: { system: boolean }): Promise<void>;
+      meetingStop?(): Promise<void>;
+      onMeetingLine?(
+        handler: (line: { segment?: string; partial?: boolean; text?: string; who?: "you" | "them"; level?: number; notice?: string; error?: string }) => void,
+      ): () => void;
+      onMeetingEnd?(handler: (payload: { code: number }) => void): () => void;
       /** bloks:// links from the website (electron/main.mjs). */
       onLink?(handler: (link: { kind: "team"; slug: string }) => void): () => void;
       pendingLink?(): Promise<{ kind: "team"; slug: string } | null>;

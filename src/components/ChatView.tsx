@@ -26,6 +26,8 @@ import { ConnectorCard } from "./ConnectorCard";
 import { SecretCard } from "./SecretCard";
 import { ChangesCard } from "./ChangesCard";
 import { ToolRun } from "./ToolRun";
+import { MeetingPanel } from "./MeetingPanel";
+import AudioLines from "lucide-react/dist/esm/icons/audio-lines.mjs";
 import {
   ForwardDialog,
   MessageActionBar,
@@ -746,6 +748,17 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           <ModelPicker bot={bot} />
           <CallButton bot={bot} />
+          {window.bloks?.meetingStart && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => dispatch({ type: "openMeeting", botId: bot.id })}
+              title={`${bot.name} takes meeting notes`}
+              aria-label="Meeting notes"
+            >
+              <AudioLines size={17} />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -1020,6 +1033,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         </div>
       )}
       <Composer bot={bot} replyTo={replyTo} onClearReply={() => setReplyTo(null)} prefill={prefill} />
+      {state.meetingFor === bot.id && <MeetingPanel bot={bot} />}
       {forwarding && (
         <ForwardDialog
           message={forwarding.message}

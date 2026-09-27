@@ -1,11 +1,12 @@
-// Where a new agent starts: a folder, a model and an effort, applied
+// Where a new agent starts: a folder, approvals, a model and an effort, applied
 // before its first turn, because a chat's folder is pinned on that turn
 // and cannot be moved after it.
 //
 // Set by the person only. Agents cannot read or write /api/config, so an
 // agent that hires another cannot hand it more than the person chose
-// here. The server checks each value again at hire time; this card only
-// shows what it refused.
+// here, and an agent hiring another passes on no more approvals than it
+// has itself. The server checks each value again at hire time; this card
+// only shows what it refused.
 //
 // A server that does not report agentDefaults does not have the feature,
 // and the card is not drawn at all rather than offering a form that
@@ -20,6 +21,12 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 
+const APPROVALS = [
+  [undefined, "Ask"],
+  ["edits", "Accept edits"],
+  ["auto", "Auto"],
+] as const;
+
 const EFFORTS = [
   [undefined, "Default"],
   ["low", "Low"],
@@ -33,6 +40,7 @@ export function AgentDefaults() {
   const [folder, setFolder] = useState(saved?.cwd ?? "");
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  const [refused, setRefused] = useState(false);
   const hydrated = useRef(false);
 
   // adopt the server value once it arrives, without stomping an edit
@@ -63,7 +71,22 @@ export function AgentDefaults() {
   };
 
   const saveFolder = (value: string) => save({ cwd: value.trim() || undefined });
-  const anySet = Boolean(saved.cwd || saved.modelSelection || saved.effort);
+  const anySet = Boolean(saved.cwd || saved.approvals || saved.modelSelection || saved.effort);
+
+  /** Auto for every new agent asks who is there, exactly as Auto for one
+   * agent does in its own settings. Without that, this card would be the
+   * way around the check. Narrowing never asks. */
+  const chooseApprovals = async (next: Defaults["approvals"]) => {
+    setRefused(false);
+    if (next === "auto" && saved.approvals !== "auto" && window.bloks?.authConfirm) {
+      const answer = await window.bloks.authConfirm("let new agents act without asking");
+      if (answer === "denied" || answer === "cancelled") {
+        setRefused(true);
+        return;
+      }
+    }
+    save({ approvals: next });
+  };
 
   return (
     <div className="mt-4 rounded-2xl border bg-card p-4">
@@ -76,7 +99,9 @@ export function AgentDefaults() {
         ) : (
           anySet && (
             <button
-              onClick={() => save({ cwd: undefined, modelSelection: undefined, effort: undefined })}
+              onClick={() =>
+                save({ cwd: undefined, approvals: undefined, modelSelection: undefined, effort: undefined })
+              }
               className="text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
             >
               Clear all
@@ -86,7 +111,7 @@ export function AgentDefaults() {
       </div>
       <div className="mt-0.5 flex items-center gap-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
         Where every agent you or your agents hire starts. Existing agents keep their own settings.
-        <InfoTip text="Applied the moment an agent is made, so its first chat already runs in the folder. Only you can change these; agents cannot. Team hires keep the lighter model the team chose and take the rest." />
+        <InfoTip text="Applied the moment an agent is made, so its first chat already runs in the folder. Only you can change these; agents cannot. An agent that hires another never hands on more approvals than it has itself. Team hires keep the lighter model the team chose and take the rest." />
       </div>
 
       <div className="mt-3.5 text-[12.5px] font-medium text-foreground">Working folder</div>
@@ -114,6 +139,27 @@ export function AgentDefaults() {
           Save
         </Button>
       </div>
+
+      <div className="mt-3.5 text-[12.5px] font-medium text-foreground">Approvals</div>
+      <div className="mt-1.5 flex gap-1 rounded-xl bg-muted p-1">
+        {APPROVALS.map(([mode, label]) => (
+          <button
+            key={label}
+            onClick={() => void chooseApprovals(mode)}
+            className={cn(
+              "flex-1 rounded-lg py-1 text-[12.5px] transition-colors duration-150",
+              saved.approvals === mode
+                ? "bg-background font-medium text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {refused && (
+        <div className="mt-1.5 text-[11.5px] text-warning">Not confirmed, so approvals are unchanged.</div>
+      )}
 
       <div className="mt-3.5 flex items-center justify-between gap-4">
         <div className="text-[12.5px] font-medium text-foreground">Model</div>

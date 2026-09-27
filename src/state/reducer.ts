@@ -239,6 +239,8 @@ export interface ConfigStatus {
 
 export interface AgentDefaults {
   cwd?: string;
+  /** Ask when unset. An agent hiring another passes on no more than its own. */
+  approvals?: "edits" | "auto";
   modelSelection?: ModelSelection;
   effort?: "low" | "medium" | "high";
 }

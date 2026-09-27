@@ -38,40 +38,18 @@ export interface Harness {
 export async function startHarness(extraEnv: Record<string, string> = {}): Promise<Harness> {
   const home = mkdtempSync(join(tmpdir(), "bloks-test-"));
   // 0 would be ideal, but the harness picks its port from the
-  // environment, so take a high one and retry if something owns it
-  const port = 20_000 + Math.floor(Math.random() * 20_000);
-
-  const child: ChildProcess = spawn(process.execPath, [ENTRY], {
-    env: {
-      ...process.env,
-      HOME: home,
-      USERPROFILE: home,
-      BLOKS_PORT: String(port),
-      // no inherited credentials: a test must never reach a real provider
-      XAI_API_KEY: "",
-      GEMINI_API_KEY: "",
-      COMPOSIO_KEY: "",
-      BOX_TOKEN: "",
-      PATH: "/nonexistent",
-      // widenPath adds $npm_config_prefix/bin, which npx exports, and a
-      // claude or codex there would make a test's engine real
-      npm_config_prefix: "",
-      PREFIX: "",
-      // bin/bloks-server.mjs sets this, so a test run from inside a Bloks
-      // agent would inherit it and find pairing forced on
-      BLOKS_LOOPBACK_ONLY: "",
-      ...extraEnv,
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let stderr = "";
-  child.stderr?.on("data", (c) => (stderr += c));
-  // Drained as well as kept: an unread stdout pipe fills and then blocks
-  // the child mid-write, which looks like a hung test and is not one.
-  let stdout = "";
-  child.stdout?.on("data", (c) => (stdout += c));
-
-  const url = `http://127.0.0.1:${port}`;
+  // environment, so take a high one and retry if something owns it.
+  // Test files run side by side, each with harnesses of its own, so two
+  // of them landing on one port is rare but real. "Something answered
+  // /api/health" is not proof it was this child: the loser of that race
+  // exits, and its test would quietly talk to another test's server. The
+  // server's own startup line, naming this port, is the proof.
+  let port = 0;
+  let child!: ChildProcess;
+  // one pair per attempt, so a killed attempt writing late cannot land
+  // in the logs of the one that won
+  let io = { out: "", err: "" };
+  let url = "";
   const request = (origin: string | null, path: string, init: RequestInit = {}) =>
     fetch(`${url}${path}`, {
       ...init,
@@ -82,18 +60,57 @@ export async function startHarness(extraEnv: Record<string, string> = {}): Promi
       },
     });
 
-  for (let i = 0; i < 100; i++) {
-    if (child.exitCode !== null) {
+  for (let attempt = 0; ; attempt++) {
+    port = 20_000 + Math.floor(Math.random() * 20_000);
+    url = `http://127.0.0.1:${port}`;
+    const mine = (io = { out: "", err: "" });
+    child = spawn(process.execPath, [ENTRY], {
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        BLOKS_PORT: String(port),
+        // no inherited credentials: a test must never reach a real provider
+        XAI_API_KEY: "",
+        GEMINI_API_KEY: "",
+        COMPOSIO_KEY: "",
+        BOX_TOKEN: "",
+        PATH: "/nonexistent",
+        // widenPath adds $npm_config_prefix/bin, which npx exports, and a
+        // claude or codex there would make a test's engine real
+        npm_config_prefix: "",
+        PREFIX: "",
+        // bin/bloks-server.mjs sets this, so a test run from inside a Bloks
+        // agent would inherit it and find pairing forced on
+        BLOKS_LOOPBACK_ONLY: "",
+        ...extraEnv,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stderr?.on("data", (c) => (mine.err += c));
+    // Drained as well as kept: an unread stdout pipe fills and then blocks
+    // the child mid-write, which looks like a hung test and is not one.
+    child.stdout?.on("data", (c) => (mine.out += c));
+
+    const listening = `bloks server on ${url}`;
+    let ready = false;
+    for (let i = 0; i < 100 && child.exitCode === null; i++) {
+      if (mine.out.includes(listening)) {
+        try {
+          ready = (await request(null, "/api/health")).ok;
+        } catch {
+          /* bound, not answering yet */
+        }
+        if (ready) break;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (ready) break;
+    if (child.exitCode === null) child.kill("SIGKILL");
+    if (!/EADDRINUSE/.test(mine.err) || attempt >= 4) {
       rmSync(home, { recursive: true, force: true });
-      throw new Error(`harness exited ${child.exitCode}: ${stderr.slice(-800)}`);
+      throw new Error(`harness exited ${child.exitCode}: ${mine.err.slice(-800)}`);
     }
-    try {
-      const res = await request(null, "/api/health");
-      if (res.ok) break;
-    } catch {
-      /* not listening yet */
-    }
-    await new Promise((r) => setTimeout(r, 100));
   }
 
   return {
@@ -105,7 +122,7 @@ export async function startHarness(extraEnv: Record<string, string> = {}): Promi
       const res = await request("http://localhost:5199", path, init);
       return res.json();
     },
-    logs: () => stdout + stderr,
+    logs: () => io.out + io.err,
     async stop() {
       child.kill("SIGTERM");
       await new Promise((r) => {

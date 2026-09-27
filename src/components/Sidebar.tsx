@@ -34,6 +34,8 @@ import { usePageVisible } from "@/lib/pageVisible";
 import { previewLine } from "@/lib/preview";
 import { inSection, sectionNames } from "@/lib/sections";
 import { useProfileNotes } from "./AboutYou";
+import { useBriefs } from "./BriefPanel";
+import Sunrise from "lucide-react/dist/esm/icons/sunrise.mjs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -476,6 +478,8 @@ export function Sidebar() {
   const activity = useActivityCount();
   const rehearsalsReady = useRehearsalsReady();
   const notesWaiting = (useProfileNotes().notes ?? []).filter((n) => n.state === "suggested").length;
+  const latestBrief = useBriefs().data?.briefs[0];
+  const briefNew = Boolean(latestBrief && !latestBrief.readAt && !latestBrief.quiet);
   const [showArchived, setShowArchived] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -874,6 +878,7 @@ export function Sidebar() {
       <div className={cn("border-t pb-2 pt-1.5", rail ? "px-2" : "px-2")}>
         {(
           [
+            [Sunrise, "Brief", () => dispatch({ type: "toggleBrief", open: true })],
             [Activity, "Activity", () => dispatch({ type: "toggleActivity", open: true })],
             [FolderKanban, "Projects", () => dispatch({ type: "toggleProjects", open: true })],
             [Brain, "Memory", () => dispatch({ type: "toggleMemory", open: true, botId: null })],
@@ -915,6 +920,12 @@ export function Sidebar() {
               >
                 {notesWaiting}
               </span>
+            )}
+            {label === "Brief" && briefNew && (
+              <span
+                className={cn("ml-auto size-2 rounded-full bg-brand", rail && "absolute right-1.5 top-1.5 ml-0")}
+                title="A new brief is ready"
+              />
             )}
             {((label === "Activity" && (activity.waiting > 0 || activity.running > 0)) ||
               (label === "Skills" && activity.suggested > 0)) && (

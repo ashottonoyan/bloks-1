@@ -18,6 +18,7 @@ import { AutomationsPanel } from "@/components/AutomationsPanel";
 import { AppSettingsPanel } from "@/components/AppSettingsPanel";
 import { ProjectsPanel } from "@/components/ProjectsPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
+import { BriefPanel } from "./components/BriefPanel";
 import { RehearsalsPanel } from "./components/RehearsalsPanel";
 import { ActivityPanel } from "@/components/Activity";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -72,6 +73,7 @@ function Shell() {
       {state.projectsOpen && <ProjectsPanel />}
       {state.memoryOpen && <MemoryPanel />}
       {state.rehearsalsOpen && <RehearsalsPanel />}
+      {state.briefOpen && <BriefPanel />}
       {state.activityOpen && <ActivityPanel />}
       <CommandPalette />
     </div>

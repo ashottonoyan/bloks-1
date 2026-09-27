@@ -123,6 +123,9 @@ export interface AppConfig {
    * the app so the settings field can prefill. */
   /** `name` is how members of a shared room see the owner. */
   profile?: { about?: string; name?: string };
+  /** The morning brief (server/brief.ts): on unless turned off, at 08:00
+   * unless another time is chosen. */
+  brief?: { enabled?: boolean; time?: string };
   /** How a lane is kept inside the model's window. Off means the fold
    * happens once at a threshold; on means one message is absorbed after
    * each turn instead. See the note in server/context.ts for what that
@@ -252,6 +255,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     "skills",
     "telegram",
     "chat",
+    "brief",
   ] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };

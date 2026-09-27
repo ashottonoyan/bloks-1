@@ -348,6 +348,8 @@ export interface AppState {
   memoryBotId: string | null;
   /** The Rehearsals panel, and a counter bumped when any rehearsal moves. */
   rehearsalsOpen: boolean;
+  /** The morning brief panel (BriefPanel). */
+  briefOpen: boolean;
   rehearsalsTick: number;
   /** Bumped when the server says a kind of thing changed (notes about
    * you, briefs, watchers, meetings), so whatever shows it re-reads. */
@@ -436,6 +438,7 @@ export type Action =
   | { type: "toggleRehearsals"; open?: boolean }
   | { type: "rehearsalsChanged" }
   | { type: "tick"; key: string }
+  | { type: "toggleBrief"; open?: boolean }
   | { type: "openProject"; id: string | null }
   | {
       type: "updateBot";
@@ -561,6 +564,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, rehearsalsOpen: action.open ?? !state.rehearsalsOpen };
     case "rehearsalsChanged":
       return { ...state, rehearsalsTick: state.rehearsalsTick + 1 };
+    case "toggleBrief":
+      return { ...state, briefOpen: action.open ?? !state.briefOpen };
     case "tick":
       return { ...state, ticks: { ...state.ticks, [action.key]: (state.ticks[action.key] ?? 0) + 1 } };
     case "toggleMemory":
@@ -836,6 +841,7 @@ export const initialState: AppState = {
   memoryOpen: false,
   memoryBotId: null,
   rehearsalsOpen: false,
+  briefOpen: false,
   rehearsalsTick: 0,
   ticks: {},
   teamLink: null,

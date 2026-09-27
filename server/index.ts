@@ -45,6 +45,7 @@ import { mayApprove, memberCan, memberFrame, memberMessage, type MemberAction, t
 import { CLI_PROVIDERS, CUSTOM_SPEC, PROVIDER_SPECS, normalizeCompatUrl, specFor } from "./providers.ts";
 import { callbackPage, finishOAuth, startOAuth, supportsOAuth } from "./oauth.ts";
 import type { ModelSelection, RuntimeEvent } from "./contracts.ts";
+import { newId } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { EventBus } from "./harness/bus.ts";
@@ -239,6 +240,8 @@ import { Checkpoints, diffLines, trackable, type CheckpointRecord } from "./chec
 import { Cooldowns, describeRest, outReason, REASON_WORDS, type Rest } from "./failover.ts";
 import { recall, recallText, type RecallSource } from "./recall.ts";
 import { noteBriefing, ProfileNotes } from "./profile-notes.ts";
+import { briefDue, composeBrief, parseBriefTime, type Brief, type BriefWaiting } from "./brief.ts";
+import { localDate } from "./usage.ts";
 import { MemoryJournal } from "./memory-journal.ts";
 import { Rehearsals, type Rehearsal } from "./rehearsals.ts";
 import { summarize, UsageStore } from "./usage.ts";
@@ -819,6 +822,130 @@ function handOver(bot: BotRecord, laneId: string, roomId: string, used: ModelSel
   return true;
 }
 
+// ── the morning brief (server/brief.ts) ────────────────────────────────
+
+const BRIEFS_FILE = join(DATA_DIR, "briefs.json");
+/** A month of mornings, then the oldest go. */
+const MAX_BRIEFS = 30;
+let briefs: Array<Brief & { readAt?: number }> = (() => {
+  try {
+    const parsed = JSON.parse(readFileSync(BRIEFS_FILE, "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+})();
+function saveBriefs() {
+  try {
+    mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    writeFileSync(BRIEFS_FILE, JSON.stringify(briefs), { mode: 0o600 });
+  } catch {
+    /* a brief is a convenience; never fail over one */
+  }
+}
+
+/** Everything waiting on a person right now: live questions and
+ * approvals, wherever they were asked. */
+function waitingOnYou(): BriefWaiting[] {
+  const out: BriefWaiting[] = [];
+  const look = (threadId: string, fallbackBot?: BotRecord) => {
+    for (const m of store.messagesFor(threadId)) {
+      const card = m.card;
+      if (m.kind !== "options" || !card?.requestId || card.answered || card.dismissed) continue;
+      if (!askThreadByRequest.has(card.requestId)) continue;
+      const bot = m.from ? store.bot(m.from) : fallbackBot;
+      if (!bot) continue;
+      const approval = Boolean(card.tool) || card.title === "Approval needed";
+      out.push({
+        botId: bot.id,
+        name: bot.name,
+        title: card.subtitle || card.title || "Something needs you",
+        threadId,
+        messageId: m.id,
+        requestId: card.requestId,
+        kind: approval ? "approval" : "question",
+      });
+    }
+  };
+  for (const bot of store.bots) if (!bot.archivedAt) for (const task of bot.tasks) look(task.id, bot);
+  for (const room of bloks.bloks) look(room.id);
+  return out;
+}
+
+function makeBrief(now = Date.now()): Brief {
+  const last = briefs[briefs.length - 1];
+  // since the last one, and never more than two days back
+  const since = Math.max(last?.at ?? 0, now - 48 * 60 * 60 * 1000);
+  usage.flush();
+  const from = localDate(new Date(since));
+  let turns = 0;
+  let cost = 0;
+  let costKnown = false;
+  for (const bucket of usage.since(3)) {
+    if (bucket.date < from) continue;
+    turns += bucket.turns;
+    cost += bucket.cost;
+    costKnown ||= bucket.costKnown;
+  }
+  const brief = composeBrief(
+    {
+      since,
+      now,
+      person: cfg.profile?.name?.trim() || undefined,
+      agents: store.bots
+        .filter((b) => !b.hidden && !b.archivedAt)
+        .map((b) => ({
+          id: b.id,
+          name: b.name,
+          lanes: b.tasks.map((t) => ({ threadId: t.id, title: t.title, messages: store.messagesFor(t.id) })),
+        })),
+      waiting: waitingOnYou(),
+      spend: { turns, cost, costKnown },
+      ready: [
+        { label: "rehearsal", count: rehearsals.all().filter((r) => r.state === "ready").length },
+        { label: "note about you", count: profileNotes.suggested().length },
+        { label: "suggested skill", count: proposals.list().length },
+      ],
+    },
+    newId(),
+  );
+  briefs = [...briefs, brief].slice(-MAX_BRIEFS);
+  saveBriefs();
+  broadcast({ kind: "brief" });
+  // the phone hears about it, sealed like any other wake; not for a
+  // quiet night, which is nobody's reason to pick up a phone
+  if (!brief.quiet) broadcast({ kind: "brief.ready", id: brief.id, headline: brief.headline });
+  return brief;
+}
+
+// Checked once a minute: the chosen time has passed and today's brief has
+// not been made. A Mac asleep at eight makes it when it wakes.
+setInterval(() => {
+  if (cfg.brief?.enabled === false) return;
+  const time = parseBriefTime(cfg.brief?.time) ?? "08:00";
+  const last = briefs[briefs.length - 1];
+  if (briefDue(time, last ? localDate(new Date(last.at)) : null, new Date())) makeBrief();
+}, 60_000).unref?.();
+
+/** Who reads each part aloud: an agent's own voice when it has one, and
+ * otherwise one of the Mac's voices, a different one per agent so the
+ * round does not sound like one person reading a list. */
+async function briefVoice(botId: string | null): Promise<speech.BotVoice | null> {
+  const bot = botId ? store.bot(botId) : null;
+  if (bot?.voice) return bot.voice;
+  const voices = (await speech.listVoices(cfg)).filter((v) => v.provider === "system");
+  if (!voices.length) {
+    if (speech.speechConfigured(cfg).openai) return { provider: "openai", id: botId ? "nova" : "alloy" };
+    return null;
+  }
+  const preferred = voices.find((v) => /^Samantha$/i.test(v.id)) ?? voices[0];
+  if (!botId) return preferred;
+  let hash = 0;
+  for (const c of botId) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  const others = voices.filter((v) => v.id !== preferred.id);
+  return others.length ? others[hash % others.length] : preferred;
+}
+
 /**
  * Whether a frame is worth waking a sleeping phone for, and whose.
  * Deliberately narrow: a turn finishing is not worth a buzz, a turn
@@ -835,6 +962,11 @@ function wakeFor(payload: unknown): Wake | undefined {
   if (p?.kind === "room.joinRequest") {
     const owner = ownerClientDigest();
     return owner ? { reason: "join-request", clients: [owner] } : "join-request";
+  }
+  // the morning brief is the owner's alone
+  if (p?.kind === "brief.ready") {
+    const owner = ownerClientDigest();
+    return owner ? { reason: "brief", clients: [owner], preview: true } : "brief";
   }
   // a shared room nearing what it may spend: the owner's to decide
   if (p?.kind === "room.spendWarning") {
@@ -885,6 +1017,8 @@ function wakeFor(payload: unknown): Wake | undefined {
  * waiting for your approval" is the thing this replaces.
  */
 function previewOf(frame: unknown): WakePreview | null {
+  const brief = frame as { kind?: string; headline?: string } | null;
+  if (brief?.kind === "brief.ready") return { title: "Your morning brief", body: String(brief.headline ?? "").slice(0, 180) };
   const f = frame as { kind?: string; threadId?: string; message?: Message } | null;
   if (f?.kind !== "message" || !f.message || !f.threadId) return null;
   const m = f.message;
@@ -7537,6 +7671,60 @@ const server = createServer(async (req, res) => {
     // A linear scan over the in-memory message stores. At personal-app
     // scale that is thousands of rows, not millions; an index would be
     // more machinery than the data deserves.
+    // ── the morning brief ──
+    if (method === "GET" && path === "/api/briefs") {
+      return json(res, 200, {
+        briefs: [...briefs].reverse(),
+        settings: { enabled: cfg.brief?.enabled !== false, time: parseBriefTime(cfg.brief?.time) ?? "08:00" },
+        audio: Boolean(await briefVoice(null)),
+      });
+    }
+    if (method === "POST" && path === "/api/briefs") {
+      if (asAgent) return json(res, 403, { error: "the brief is for the person" });
+      return json(res, 201, { brief: makeBrief() });
+    }
+    if (method === "PATCH" && path === "/api/briefs/settings") {
+      if (asAgent) return json(res, 403, { error: "the brief is for the person" });
+      const body = await readBody(req);
+      const next: { enabled?: boolean; time?: string } = {};
+      if (typeof body.enabled === "boolean") next.enabled = body.enabled;
+      if (body.time !== undefined) {
+        const time = parseBriefTime(body.time);
+        if (!time) return json(res, 400, { error: "a time is HH:MM, like 08:00" });
+        next.time = time;
+      }
+      cfg.brief = { ...(cfg.brief ?? {}), ...next };
+      saveConfig({ brief: cfg.brief });
+      broadcast({ kind: "brief" });
+      return json(res, 200, { settings: { enabled: cfg.brief.enabled !== false, time: parseBriefTime(cfg.brief.time) ?? "08:00" } });
+    }
+    m = path.match(/^\/api\/briefs\/([\w-]+)\/read$/);
+    if (m && method === "POST") {
+      const found = briefs.find((b) => b.id === m![1]);
+      if (!found) return json(res, 404, { error: "no such brief" });
+      found.readAt = found.readAt ?? Date.now();
+      saveBriefs();
+      broadcast({ kind: "brief" });
+      return json(res, 200, { ok: true });
+    }
+    m = path.match(/^\/api\/briefs\/([\w-]+)\/parts\/(\d+)\/audio$/);
+    if (m && method === "GET") {
+      const found = briefs.find((b) => b.id === m![1]);
+      const part = found?.parts[Number(m[2])];
+      if (!part) return json(res, 404, { error: "no such part" });
+      const voice = await briefVoice(part.botId);
+      if (!voice) return json(res, 409, { error: "no voice is available: pick one for an agent, or add a speech key" });
+      try {
+        const { stream, mime } = await speech.speak(cfg, voice, speakable(part.script));
+        res.writeHead(200, { "content-type": mime, "cache-control": "no-store" });
+        const { Readable } = await import("node:stream");
+        Readable.fromWeb(stream as import("node:stream/web").ReadableStream).pipe(res);
+      } catch (e) {
+        json(res, 502, { error: redactSecrets(e instanceof Error ? e.message : String(e)) });
+      }
+      return;
+    }
+
     // ── what your agents know about you ──
     if (method === "GET" && path === "/api/profile/notes") {
       return json(res, 200, { notes: profileNotes.list() });

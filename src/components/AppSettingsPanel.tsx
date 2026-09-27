@@ -29,6 +29,7 @@ import { cn } from "@/lib/cn";
 import { thisComputer } from "@/lib/thisComputer";
 import { UseFromOtherApps } from "./UseFromOtherApps";
 import { BoxSleep } from "./BoxSleep";
+import { AgentDefaults } from "./AgentDefaults";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: React.ReactNode }> = [
   { value: "light", label: "Light", icon: <Sun size={14} /> },
@@ -527,6 +528,7 @@ export function AppSettingsPanel() {
                 <Compaction />
                 <ProposeSkills />
                 <AboutYou />
+                <AgentDefaults />
                 <Diagnostics />
                 <AboutCard />
               </>

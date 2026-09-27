@@ -43,7 +43,9 @@ export function ModelPicker({
   noneLabel,
   exclude,
 }: {
-  bot: Bot;
+  /** Whose model this is. Optional only with `onPick`, which picks
+   * for something that is not an agent yet (the new-agent default). */
+  bot?: Bot;
   className?: string;
   /** Pick something other than the agent's own engine (its backup).
    * `value` null shows `noneLabel`, and the list offers it as a choice. */
@@ -59,7 +61,7 @@ export function ModelPicker({
   const rootRef = useRef<HTMLDivElement>(null);
 
   const custom = onPick !== undefined;
-  const selection: ModelSelection = (custom ? value : bot.modelSelection) ?? { instanceId: "", model: "" };
+  const selection: ModelSelection = (custom ? value : bot?.modelSelection) ?? { instanceId: "", model: "" };
   const instances = state.instances.filter((i) => i.instanceId !== exclude);
   const active = instances.find((i) => i.instanceId === selection.instanceId);
   const railInstance =
@@ -83,7 +85,7 @@ export function ModelPicker({
   const pick = (instance: InstanceInfo, model: string) => {
     const next = { instanceId: instance.instanceId, model };
     if (custom) onPick(next);
-    else dispatch({ type: "setModel", botId: bot.id, selection: next });
+    else if (bot) dispatch({ type: "setModel", botId: bot.id, selection: next });
     setOpen(false);
   };
 

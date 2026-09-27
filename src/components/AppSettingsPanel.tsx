@@ -28,6 +28,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/cn";
 import { thisComputer } from "@/lib/thisComputer";
 import { UseFromOtherApps } from "./UseFromOtherApps";
+import { BoxSleep } from "./BoxSleep";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: React.ReactNode }> = [
   { value: "light", label: "Light", icon: <Sun size={14} /> },
@@ -565,6 +566,7 @@ export function AppSettingsPanel() {
                       linkHref: "https://docs.ascii.dev/box/api-keys",
                     }}
                   />
+                  <BoxSleep />
                 </div>
               </div>
               <McpServersCard />

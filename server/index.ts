@@ -561,6 +561,35 @@ const toldOfRest = new Map<string, number>();
 /** Errors kept off the chat while a backup might take over. */
 const heldErrors = new Map<string, string>();
 
+// ── cloud computers sleep when nobody is using them ──────────────────
+// A box bills while it is awake. Once an agent has not used its computer
+// for a while (twenty minutes unless changed), Bloks puts it to sleep:
+// the disk and everything on it stay, and it wakes again before the next
+// turn that needs it.
+const boxUsed = new Map<string, number>();
+setInterval(() => {
+  const after = cfg.box?.sleepAfter ?? 20;
+  if (!after || !box.boxConfigured(cfg)) return;
+  const now = Date.now();
+  for (const [botId, last] of boxUsed) {
+    const bot = store.bot(botId);
+    if (!bot) {
+      boxUsed.delete(botId);
+      continue;
+    }
+    if (bot.busy) {
+      boxUsed.set(botId, now);
+      continue;
+    }
+    if (now - last < after * 60_000) continue;
+    boxUsed.delete(botId);
+    void box
+      .sleepBox(cfg, botId)
+      .then(() => broadcast({ kind: "computer", botId, state: "asleep" }))
+      .catch(() => {});
+  }
+}, 60_000).unref?.();
+
 /** Whether an engine can take a turn right now, as far as we know. */
 function engineUsable(selection: ModelSelection | null | undefined): selection is ModelSelection {
   if (!selection?.instanceId) return false;
@@ -2362,7 +2391,17 @@ async function startTurn(
           await box.provisionBox(cfg, bot.id, bot.name);
           b = await box.findBox(cfg, bot.id).catch(() => null);
         }
-        if (b) integrations.computer = { boxId: b.id, token: cfg.box!.token! };
+        // A computer put to sleep for being idle wakes before the turn
+        // needs it, rather than failing the turn's first command.
+        if (b && !box.isAwake(b)) {
+          broadcast({ kind: "computer", botId: bot.id, state: "waking" });
+          b = await box.wakeBox(cfg, b);
+          if (!b) throw new Error(`${bot.name}'s computer did not wake in time. Try again in a minute.`);
+        }
+        if (b) {
+          integrations.computer = { boxId: b.id, token: cfg.box!.token! };
+          boxUsed.set(bot.id, Date.now());
+        }
       }
       // local computer (this Mac) via the Electron-hosted cua-driver: the
       // Electron main process owns the daemon (TCC attribution) and writes
@@ -9628,6 +9667,19 @@ const server = createServer(async (req, res) => {
     }
 
     // ── the bot's cloud computer (Box) ──
+    if (path === "/api/box/settings" && (method === "GET" || method === "PATCH")) {
+      if (asAgent) return json(res, 403, { error: "that is the person's setting" });
+      if (method === "PATCH") {
+        const body = await readBody(req);
+        const minutes = Number(body.sleepAfter);
+        if (!Number.isFinite(minutes) || minutes < 0 || minutes > 24 * 60) {
+          return json(res, 400, { error: "sleepAfter is minutes, 0 to 1440" });
+        }
+        cfg.box = { ...(cfg.box ?? {}), sleepAfter: Math.round(minutes) };
+        saveConfig({ box: { sleepAfter: cfg.box.sleepAfter } });
+      }
+      return json(res, 200, { sleepAfter: cfg.box?.sleepAfter ?? 20 });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer$/);
     if (m && method === "GET") return json(res, 200, await box.boxStatus(cfg, m[1]));
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/(provision|join|sleep|exec|screenshot)$/);
@@ -9635,6 +9687,9 @@ const server = createServer(async (req, res) => {
       const botId = m[1];
       const bot = store.bot(botId);
       if (!bot) return json(res, 404, { error: "no such agent" });
+      // a person at the desktop is using it as much as a turn is
+      if (m[2] === "sleep") boxUsed.delete(botId);
+      else boxUsed.set(botId, Date.now());
       switch (m[2]) {
         case "provision":
           return json(res, 200, await box.provisionBox(cfg, botId, bot.name));

@@ -275,6 +275,18 @@ export async function joinBox(cfg: AppConfig, botId: string) {
   return { joinUrl: await mintDesktopUrl(cfg, box.id), state: awake.state ?? null };
 }
 
+/** Whether a box as listed will answer a command without waking. */
+export function isAwake(box: { state?: string } | null | undefined): boolean {
+  return Boolean(box && AWAKE.has(String(box.state)));
+}
+
+/** A box that answers, waking it first when it sleeps. Null when it will
+ * not wake in time. */
+export async function wakeBox(cfg: AppConfig, box: { id: string; state?: string }) {
+  if (isAwake(box)) return box;
+  return waitUntilAwake(cfg, box.id);
+}
+
 /** Archive it now: billing stops, the disk survives. */
 export async function sleepBox(cfg: AppConfig, botId: string) {
   const box = await findBox(cfg, botId);

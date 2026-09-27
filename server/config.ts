@@ -62,7 +62,9 @@ export interface AppConfig {
      * environment or Codex's auth file for voice billing. */
     useDiscoveredOpenAI?: boolean;
   };
-  box?: { token?: string };
+  /** `sleepAfter`: minutes without work before Bloks puts an agent's
+   * cloud computer to sleep (billing stops, the disk stays). 0 never. */
+  box?: { token?: string; sleepAfter?: number };
   /** Keyboard shortcuts the desktop shell registers with the system.
    * Off until somebody sets one: a global hotkey that arrives
    * uninvited will collide with whatever they already use. */

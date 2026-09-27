@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/cn";
 import { thisComputer } from "@/lib/thisComputer";
+import { UseFromOtherApps } from "./UseFromOtherApps";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: React.ReactNode }> = [
   { value: "light", label: "Light", icon: <Sun size={14} /> },
@@ -567,6 +568,7 @@ export function AppSettingsPanel() {
                 </div>
               </div>
               <McpServersCard />
+              <UseFromOtherApps />
               </>
             )}
 

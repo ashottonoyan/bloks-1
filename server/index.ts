@@ -397,6 +397,8 @@ function standingOf(project: Project): ProjectStanding {
 const agentTokens = new AgentTokens();
 setInterval(() => agentTokens.sweep(Date.now()), 5 * 60_000).unref?.();
 const AGENT_CLI = fileURLToPath(new URL("../bin/bloks.mjs", import.meta.url));
+/** Bloks as an MCP server for other AI apps (bin/bloks-mcp.mjs). */
+const MCP_CLI = fileURLToPath(new URL("../bin/bloks-mcp.mjs", import.meta.url));
 
 /** The agent browser's debugging port. One browser serves every agent
  * that has one; profiles keep their sessions apart. */
@@ -7943,6 +7945,23 @@ const server = createServer(async (req, res) => {
       const w = watchers.find((x) => x.id === m![1]);
       if (!w || (asAgent && w.botId !== asAgent.botId)) return json(res, 404, { error: "no such watcher" });
       return json(res, 200, await checkWatcher(w.id, true));
+    }
+
+    // What is waiting on the person right now, wherever it was asked.
+    if (method === "GET" && path === "/api/waiting") {
+      if (asAgent) return json(res, 403, { error: "that is the person's list" });
+      return json(res, 200, { waiting: waitingOnYou() });
+    }
+    // How another AI app starts Bloks' MCP server. The command is the
+    // runtime this server itself runs on, so nothing else has to be
+    // installed: in the packaged app that is Bloks, run as Node.
+    if (method === "GET" && path === "/api/mcp-config") {
+      if (!local) return json(res, 403, { error: "only from this computer" });
+      return json(res, 200, {
+        command: process.execPath,
+        args: [MCP_CLI],
+        env: { ELECTRON_RUN_AS_NODE: "1" },
+      });
     }
 
     // ── engine scout: which engine's work you keep ──

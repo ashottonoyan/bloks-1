@@ -132,3 +132,17 @@ describe("through the server", () => {
     assert.ok(res.hits.some((hit: any) => /what you need/i.test(hit.text)), "the greeting is found");
   });
 });
+
+describe("Mac voices", () => {
+  test("the real voices are offered, the novelty ones are not", async () => {
+    const { parseSayVoices } = await import("../server/speech.ts");
+    const listing = [
+      "Samantha            en_US    # Hello! My name is Samantha.",
+      "Bad News            en_US    # The light you see at the end of the tunnel.",
+      "Eddy (English (UK)) en_GB    # Hello! My name is Eddy.",
+      "Alice               it_IT    # Ciao! Mi chiamo Alice.",
+    ].join("\n");
+    assert.deepEqual(parseSayVoices(listing).map((v) => v.id), ["Samantha", "Eddy (English (UK))"]);
+    assert.equal(parseSayVoices(listing)[0].provider, "system");
+  });
+});

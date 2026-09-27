@@ -24,7 +24,7 @@ import { routeSpokenToRoom } from "@/lib/spokenRouting";
 import { thisComputer } from "@/lib/thisComputer";
 
 interface VoiceOption {
-  provider: "elevenlabs" | "openai";
+  provider: "elevenlabs" | "openai" | "system";
   id: string;
   name: string;
 }
@@ -107,7 +107,7 @@ export function VoiceCard({ bot }: { bot: Bot }) {
   const [voices, setVoices] = useState<VoiceOption[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
-  const configured = state.config?.speech?.elevenlabs || state.config?.speech?.openai;
+  const configured = state.config?.speech?.elevenlabs || state.config?.speech?.openai || state.config?.speech?.system;
 
   useEffect(() => {
     if (!open || voices !== null) return;
@@ -212,7 +212,7 @@ export function VoiceCard({ bot }: { bot: Bot }) {
                     {voice.name}
                   </span>
                   <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {voice.provider === "elevenlabs" ? "11L" : "OpenAI"}
+                    {voice.provider === "elevenlabs" ? "11L" : voice.provider === "openai" ? "OpenAI" : "Mac"}
                   </span>
                 </button>
               );

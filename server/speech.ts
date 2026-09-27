@@ -1,27 +1,31 @@
 // Agents get voices.
 //
 // One interface, several vendors: ElevenLabs when its key is present,
-// OpenAI's speech API when that one is. The harness holds the keys and
+// OpenAI's speech API when that one is, and on a Mac the voices macOS
+// ships with, which need no key and no account, so every agent can talk
+// from the first day. The harness holds the keys and
 // streams the audio through; a client never touches a vendor directly.
 // Voices are listed live from vendors that have a catalog and from a
 // fixed set where the vendor ships one, merged into a single picker.
 //
 // Text is capped before it becomes sound: TTS is billed per character,
 // and a runaway reply should cost a sentence, not a chapter.
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { execFile } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 
 import type { AppConfig } from "./config.ts";
 
 export interface Voice {
-  provider: "elevenlabs" | "openai";
+  provider: "elevenlabs" | "openai" | "system";
   id: string;
   name: string;
 }
 
 export interface BotVoice {
-  provider: "elevenlabs" | "openai";
+  provider: "elevenlabs" | "openai" | "system";
   id: string;
   name?: string;
 }
@@ -69,9 +73,73 @@ function openaiKey(cfg: AppConfig): string | undefined {
   return undefined;
 }
 
+// ── the Mac's own voices ───────────────────────────────────────────────
+
+/** The novelty voices macOS carries alongside the real ones. Offered to
+ * nobody: an agent announcing a deploy in "Bubbles" is a joke once. */
+const NOVELTY = new Set([
+  "Albert", "Bad News", "Bahh", "Bells", "Boing", "Bubbles", "Cellos", "Good News", "Jester",
+  "Organ", "Superstar", "Trinoids", "Whisper", "Wobble", "Zarvox", "Fred", "Junior", "Ralph", "Kathy",
+]);
+
+/** `say -v '?'` lines: "Samantha            en_US    # Hello! My name is Samantha." */
+export function parseSayVoices(listing: string, languages = /^en_/): Voice[] {
+  const voices: Voice[] = [];
+  for (const line of listing.split("\n")) {
+    const found = line.match(/^(.+?)\s+([a-z]{2,3}_[A-Za-z0-9]{2,4})\s+#/);
+    if (!found) continue;
+    const name = found[1].trim();
+    if (!languages.test(found[2])) continue;
+    if (NOVELTY.has(name) || NOVELTY.has(name.split(" (")[0])) continue;
+    voices.push({ provider: "system", id: name, name: `${name} (${found[2].replace("_", "-")})` });
+  }
+  return voices;
+}
+
+let systemVoices: Promise<Voice[]> | null = null;
+
+/** The Mac's voices, read once. Empty anywhere else. */
+function macVoices(): Promise<Voice[]> {
+  if (process.platform !== "darwin") return Promise.resolve([]);
+  systemVoices ??= new Promise((resolve) => {
+    execFile("/usr/bin/say", ["-v", "?"], { timeout: 10_000 }, (error, stdout) =>
+      resolve(error ? [] : parseSayVoices(String(stdout))),
+    );
+  });
+  return systemVoices;
+}
+
+/** Speech from `say`, as AAC in an M4A container every player takes. The
+ * text goes in on stdin, so a reply never appears in a process listing. */
+function sayToStream(voice: string, text: string): Promise<ReadableStream<Uint8Array>> {
+  return new Promise((resolve, reject) => {
+    const dir = mkdtempSync(join(tmpdir(), "bloks-say-"));
+    const out = join(dir, "speech.m4a");
+    const child = execFile(
+      "/usr/bin/say",
+      ["-v", voice, "-o", out, "--file-format=m4af", "--data-format=aac", "-f", "-"],
+      { timeout: 60_000 },
+      (error) => {
+        try {
+          if (error) throw error;
+          const audio = readFileSync(out);
+          resolve(Readable.toWeb(Readable.from([audio])) as ReadableStream<Uint8Array>);
+        } catch (e) {
+          reject(new Error(`the Mac voice could not speak: ${(e as Error).message}`));
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+    child.stdin?.end(text);
+  });
+}
+
 export function speechConfigured(cfg: AppConfig): {
   elevenlabs: boolean;
   openai: boolean;
+  /** The Mac's own voices, which need nothing set up. */
+  system: boolean;
   /** In use, from consented discovery: where it came from. */
   openaiSource?: "env" | "codex";
   /** Found but NOT in use: awaiting the user's yes. */
@@ -82,6 +150,7 @@ export function speechConfigured(cfg: AppConfig): {
   return {
     elevenlabs: Boolean(cfg.speech?.elevenlabsKey),
     openai: Boolean(openaiKey(cfg)),
+    system: process.platform === "darwin",
     ...(discovered && consented ? { openaiSource: discovered.source } : {}),
     ...(discovered && !consented ? { openaiAvailable: discovered.source } : {}),
   };
@@ -109,6 +178,8 @@ export async function listVoices(cfg: AppConfig): Promise<Voice[]> {
     }
   }
   if (openaiKey(cfg)) voices.push(...OPENAI_VOICES);
+  // last: the paid voices are the ones somebody set up on purpose
+  voices.push(...(await macVoices()));
   return voices;
 }
 
@@ -122,6 +193,12 @@ export async function speak(
   text: string,
 ): Promise<{ stream: ReadableStream<Uint8Array>; mime: string }> {
   const clipped = text.slice(0, SPEAK_MAX_CHARS);
+  if (voice.provider === "system") {
+    if (process.platform !== "darwin") throw new Error("Mac voices only speak on a Mac");
+    // only a voice the Mac actually lists, never an arbitrary argument
+    if (!(await macVoices()).some((v) => v.id === voice.id)) throw new Error("that Mac voice is not installed");
+    return { stream: await sayToStream(voice.id, clipped), mime: "audio/mp4" };
+  }
   if (voice.provider === "elevenlabs") {
     const key = cfg.speech?.elevenlabsKey;
     if (!key) throw new Error("no ElevenLabs key configured");
@@ -169,7 +246,7 @@ export function parseBotVoice(raw: unknown): BotVoice | null | undefined {
   if (raw === null) return null;
   if (!raw || typeof raw !== "object") return undefined;
   const v = raw as Record<string, unknown>;
-  if (v.provider !== "elevenlabs" && v.provider !== "openai") return undefined;
+  if (v.provider !== "elevenlabs" && v.provider !== "openai" && v.provider !== "system") return undefined;
   if (typeof v.id !== "string" || !v.id || v.id.length > 120) return undefined;
   return {
     provider: v.provider,

@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld("bloks", {
   quickOpenMain: () => ipcRenderer.invoke("quick:open-main"),
   onQuickOpened: subscription("quick:opened"),
   onNotifyActivate: subscription("notify:activate"),
+  // bloks:// links from the website (electron/main.mjs)
+  onLink: subscription("link:open"),
+  pendingLink: () => ipcRenderer.invoke("link:pending"),
   speechStart: () => ipcRenderer.invoke("speech:start"),
   speechStop: () => ipcRenderer.invoke("speech:stop"),
   onSpeechTranscript: subscription("speech:transcript"),

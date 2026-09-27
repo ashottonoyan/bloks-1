@@ -102,7 +102,52 @@ let serverStarted = true;
 if (!app.requestSingleInstanceLock()) {
   app.exit(0);
 }
-app.on("second-instance", () => {
+
+// bloks:// links from the website ("Add to Bloks" on a team in the
+// gallery). Only a gallery team by name is understood: a link cannot
+// point the app at an arbitrary address, and what it opens is the same
+// review a person sees when importing by hand, so nothing is created
+// until they choose the seats. macOS hands links over with open-url, the
+// others as an argument to a second launch.
+app.setAsDefaultProtocolClient("bloks");
+let pendingLink = null;
+/** A link worth passing on, or null. */
+function teamLink(raw) {
+  try {
+    const url = new URL(String(raw));
+    if (url.protocol !== "bloks:" || url.hostname !== "team") return null;
+    const slug = url.pathname.replace(/^\/+|\/+$/g, "");
+    return /^[a-z0-9-]{1,60}$/.test(slug) ? { kind: "team", slug } : null;
+  } catch {
+    return null;
+  }
+}
+function deliverLink(raw) {
+  const link = teamLink(raw);
+  if (!link) return;
+  const main = BrowserWindow.getAllWindows().find((w) => w !== quickWin && !w.isDestroyed());
+  if (!main || main.webContents.isLoading()) {
+    pendingLink = link;
+    return;
+  }
+  if (main.isMinimized()) main.restore();
+  main.show();
+  main.focus();
+  main.webContents.send("link:open", link);
+}
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  deliverLink(url);
+});
+ipcMain.handle("link:pending", () => {
+  const link = pendingLink;
+  pendingLink = null;
+  return link;
+});
+
+app.on("second-instance", (_event, argv = []) => {
+  const link = argv.find((arg) => typeof arg === "string" && arg.startsWith("bloks://"));
+  if (link) deliverLink(link);
   const main = BrowserWindow.getAllWindows().find((w) => w !== quickWin && !w.isDestroyed());
   if (!main) return;
   if (main.isMinimized()) main.restore();

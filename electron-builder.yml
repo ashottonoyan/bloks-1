@@ -34,6 +34,11 @@ extraResources:
   - from: bin
     to: bin
 
+# bloks://team/<slug>, from "Add to Bloks" on the website's team gallery
+protocols:
+  - name: Bloks
+    schemes: [bloks]
+
 mac:
   # The Swift helpers are macOS machinery (TCC prompts, dictation) and
   # ship only here; the other platforms degrade those features honestly.

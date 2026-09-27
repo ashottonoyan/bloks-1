@@ -347,6 +347,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void bridge.notifyShow(notice).catch(() => {});
   }, []);
 
+  // "Add to Bloks" on the website: a gallery team opens in the hire
+  // review (NewRoomDialog), whether the app was running or not.
+  useEffect(() => {
+    const bridge = window.bloks;
+    if (!bridge?.onLink) return;
+    const open = (link: { kind?: string; slug?: string } | null) => {
+      if (link?.kind === "team" && link.slug) rawDispatch({ type: "openTeamLink", slug: link.slug });
+    };
+    void bridge.pendingLink?.().then(open).catch(() => {});
+    return bridge.onLink(open);
+  }, []);
+
   // Clicking a banner opens what it was about.
   useEffect(() => {
     const bridge = window.bloks;

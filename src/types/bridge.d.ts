@@ -54,6 +54,9 @@ declare global {
         avatar?: string;
       }): Promise<void>;
       onNotifyActivate(handler: (payload: { target: string }) => void): () => void;
+      /** bloks:// links from the website (electron/main.mjs). */
+      onLink?(handler: (link: { kind: "team"; slug: string }) => void): () => void;
+      pendingLink?(): Promise<{ kind: "team"; slug: string } | null>;
       /** Puts a number on the Dock icon; 0 clears it. */
       badgeSet(count: number): Promise<void>;
       /** The disk path behind a dropped or picked File, or "" when the

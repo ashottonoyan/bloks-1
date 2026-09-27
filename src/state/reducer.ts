@@ -188,7 +188,7 @@ export interface Bot {
   /** Ids of user-registered MCP servers this agent may use. */
   mcpServers?: string[];
   /** How this agent sounds; unset means no voice yet. */
-  voice?: { provider: "elevenlabs" | "openai"; id: string; name?: string } | null;
+  voice?: { provider: "elevenlabs" | "openai" | "system"; id: string; name?: string } | null;
   /** Read replies aloud as they settle. */
   speakReplies?: boolean;
   /** The public half of this agent's key, hex. What its signatures in
@@ -216,7 +216,14 @@ export interface ConfigStatus {
 };
   composio: { configured: boolean; apiKeyConfigured?: boolean };
   box: { configured: boolean };
-  speech?: { elevenlabs: boolean; openai: boolean; openaiSource?: "env" | "codex"; openaiAvailable?: "env" | "codex" };
+  speech?: {
+    elevenlabs: boolean;
+    openai: boolean;
+    /** The Mac's own voices: no key, no account. */
+    system?: boolean;
+    openaiSource?: "env" | "codex";
+    openaiAvailable?: "env" | "codex";
+  };
   /** Shared context for every agent, not a secret, so it round-trips. */
   profile?: { about: string };
   /** How lanes are kept inside the model's window. */
@@ -345,6 +352,8 @@ export interface AppState {
   /** Bumped when the server says a kind of thing changed (notes about
    * you, briefs, watchers, meetings), so whatever shows it re-reads. */
   ticks: Record<string, number>;
+  /** A gallery team a bloks:// link asked to open, until the dialog takes it. */
+  teamLink: string | null;
   routinesOpen: boolean;
   newRoomOpen: boolean;
   projectsOpen: boolean;
@@ -383,6 +392,7 @@ export type Action =
   | { type: "patchRoom"; blokId: string; patch: { archived?: boolean; name?: string; section?: string | null } }
   | { type: "sendToRoom"; blokId: string; text: string; replyTo?: Message["replyTo"] }
   | { type: "toggleNewRoom"; open?: boolean }
+  | { type: "openTeamLink"; slug: string | null }
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "providers"; providers: ProviderRow[] }
   | { type: "connectProvider"; kind: string; key?: string; url?: string }
@@ -543,6 +553,8 @@ export function reducer(state: AppState, action: Action): AppState {
         state.selectedId === action.blokId ? (state.bots[0]?.id ?? "") : state.selectedId;
       return { ...state, bloks, selectedId };
     }
+    case "openTeamLink":
+      return { ...state, teamLink: action.slug, newRoomOpen: action.slug ? true : state.newRoomOpen };
     case "toggleNewRoom":
       return { ...state, newRoomOpen: action.open ?? !state.newRoomOpen };
     case "toggleRehearsals":
@@ -826,6 +838,7 @@ export const initialState: AppState = {
   rehearsalsOpen: false,
   rehearsalsTick: 0,
   ticks: {},
+  teamLink: null,
   routinesOpen: false,
   newRoomOpen: false,
   projectsOpen: false,

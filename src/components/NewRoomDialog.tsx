@@ -107,6 +107,30 @@ export function NewRoomDialog() {
       });
   }, [tab, galleryTeams]);
 
+  // A bloks:// link from the website's gallery: find the team and open
+  // the same hire review a manual import does. The premade six count too.
+  const [linkError, setLinkError] = useState<string | null>(null);
+  useEffect(() => {
+    const slug = state.teamLink;
+    if (!slug) return;
+    dispatch({ type: "openTeamLink", slug: null });
+    setLinkError(null);
+    setTab("library");
+    const premade = TEAM_LIBRARY.find((t) => t.slug === slug);
+    if (premade) {
+      hire({ name: premade.name, members: premade.members } as HireableTeam);
+      return;
+    }
+    api("/api/teams/gallery")
+      .then((r) => {
+        const team = (r.teams ?? []).find((t: GalleryTeam) => t.slug === slug);
+        if (team) hire({ name: team.name, members: team.members });
+        else setLinkError("That team is not in the gallery any more.");
+      })
+      .catch((e: Error) => setLinkError(`The gallery could not be reached: ${e.message}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.teamLink]);
+
   const modelLabel = (bot: Bot) => {
     const instance = state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId);
     const option = instance?.models.options.find((o) => o.id === bot.modelSelection.model);
@@ -372,6 +396,7 @@ export function NewRoomDialog() {
 
         {hiring && <TeamHireDialog team={hiring} onClose={() => setHiring(null)} />}
         {importError && <div className="mt-2 text-center text-[11.5px] text-destructive">{importError}</div>}
+        {linkError && <div className="mt-2 text-center text-[11.5px] text-destructive">{linkError}</div>}
 
         <label className="mt-2 block cursor-pointer text-center text-[12px] text-muted-foreground transition-colors hover:text-foreground">
           Or import a team file (.md)

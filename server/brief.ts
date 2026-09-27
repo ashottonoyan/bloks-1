@@ -43,8 +43,9 @@ export interface BriefInput {
   agents: BriefAgent[];
   waiting: BriefWaiting[];
   spend: { turns: number; cost: number; costKnown: boolean };
-  /** Other things ready for a look: rehearsals, suggested notes, skills. */
-  ready?: Array<{ label: string; count: number }>;
+  /** Other things ready for a look: rehearsals, suggested notes, skills.
+   * `many` is the plural when adding an s would be wrong. */
+  ready?: Array<{ label: string; many?: string; count: number }>;
 }
 
 export interface BriefItem {
@@ -69,7 +70,7 @@ export interface Brief {
   parts: BriefPart[];
   waiting: BriefWaiting[];
   spend: BriefInput["spend"];
-  ready: Array<{ label: string; count: number }>;
+  ready: Array<{ label: string; many?: string; count: number }>;
   /** Nothing happened and nothing is waiting. */
   quiet: boolean;
 }
@@ -106,9 +107,12 @@ function agentPart(agent: BriefAgent, since: number, now: number): BriefPart | n
   const items: BriefItem[] = [];
   for (const lane of agent.lanes) {
     const recent = lane.messages.filter((m) => m.at >= since && m.at <= now && !m.deleted);
+    // only work that answered something: a greeting on the day an agent
+    // was made is not an agent having worked
+    const asked = recent.some((m) => m.role === "user");
     const replies = recent.filter((m) => m.role === "bot" && (m.kind ?? "text") === "text" && m.text?.trim());
     const files = recent.reduce((n, m) => n + (m.kind === "changes" ? (m.changes?.total ?? 0) : 0), 0);
-    if (!replies.length && !files) continue;
+    if ((!replies.length || !asked) && !files) continue;
     const last = replies[replies.length - 1];
     const said = last ? gist(last.text!) : "";
     const where = lane.title && lane.title !== "General" ? `${lane.title}: ` : "";
@@ -155,7 +159,7 @@ export function composeBrief(input: BriefInput, id: string): Brief {
 
   const closingLines = [
     ...waiting.slice(0, 5).map((w) => `${w.name} ${w.kind === "approval" ? "wants your OK to" : "asks"}: ${gist(w.title, 1, 140)}`),
-    ...ready.map((r) => `${plural(r.count, r.label)} ready for a look.`),
+    ...ready.map((r) => `${plural(r.count, r.label, r.many)} ready for a look.`),
   ];
   const closing: BriefPart | null = closingLines.length
     ? {

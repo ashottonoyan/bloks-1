@@ -952,7 +952,7 @@ function makeBrief(now = Date.now()): Brief {
       spend: { turns, cost, costKnown },
       ready: [
         { label: "rehearsal", count: rehearsals.all().filter((r) => r.state === "ready").length },
-        { label: "note about you", count: profileNotes.suggested().length },
+        { label: "note about you", many: "notes about you", count: profileNotes.suggested().length },
         { label: "suggested skill", count: proposals.list().length },
       ],
     },
@@ -1067,7 +1067,7 @@ function wakeFor(payload: unknown): Wake | undefined {
  */
 function previewOf(frame: unknown): WakePreview | null {
   const brief = frame as { kind?: string; headline?: string } | null;
-  if (brief?.kind === "brief.ready") return { title: "Your morning brief", body: String(brief.headline ?? "").slice(0, 180) };
+  if (brief?.kind === "brief.ready") return { title: "Your morning brief", body: String(brief.headline ?? "").slice(0, 180), category: "brief" };
   const f = frame as { kind?: string; threadId?: string; message?: Message } | null;
   if (f?.kind !== "message" || !f.message || !f.threadId) return null;
   const m = f.message;

@@ -156,6 +156,55 @@ their seniority and skills, and a brief. Export any room as one, import
 one from a friend, or hire from the gallery at
 [bloks.dev/teams](https://bloks.dev/teams/).
 
+**A morning brief.** Each morning (08:00 unless you choose another time)
+Bloks writes up what every agent did while you were away, what is
+waiting on you, and what it cost. Every line links to where it came
+from, approvals can be answered from it, and Play reads it as a round in
+which each agent says its own part in its own voice. It is built from
+what is already on disk, not by a model, so it is free and instant.
+
+**Watchers.** Point an agent at a folder, a web page or a feed, and say
+what to do when it changes: "when an invoice lands here, file it", "tell
+me when this price drops". A folder is seen within seconds, pages and
+feeds on a schedule. The first look is only a baseline, a watcher fires
+at most six times an hour, and it can rehearse on a copy first. Or just
+ask an agent to keep an eye on something; it files the watcher itself.
+
+**Meeting notes.** Press the waveform beside an agent's name and it
+listens on your Mac: your microphone and, when you allow it, the other
+side of a Zoom or Meet call. Transcription is Apple's, on the device;
+nothing joins the call and nothing is recorded. When you stop, the agent
+writes a summary, the decisions and the action items, and an item that
+belongs to one of your agents is handed to it with one press.
+
+**Agents that remember, and learn about you.** An agent can search its
+own past conversations when something may have come up before. It can
+also suggest short notes about you (how you like answers, your timezone,
+names you use); nothing is added until you keep it in Memory, About you,
+and a kept note is shared by every agent from then on, never with people
+you invite into a room.
+
+**Email your agent.** With Bloks Cloud, each agent gets an address like
+`scout.3f9a1c0b7d2e4f6a8b1c@agents.bloks.dev`. Forward it an invoice, a
+newsletter or a thread and it gets to work; what it says back is emailed
+as the reply, and it can only reply to someone who wrote to it.
+
+**Engine scout.** Bloks learns which engine does your work well from
+what you do with it: a change you undo, a conversation you rewind past,
+a rehearsal you discard. Settings, Engines shows how often each one's
+work is kept and what it costs, and when a lighter model has been doing
+as well for an agent, it says so with a button to switch.
+
+**Voices without a key.** On a Mac, agents can speak with the voices
+macOS ships with, so read-aloud, calls and the brief work from the first
+day. ElevenLabs and OpenAI voices are there when you add a key.
+
+**From your other AI apps.** Bloks is an MCP server: Claude Desktop,
+Claude Code or Cursor can ask your agents for work, read their
+conversations and see what is waiting on you. It cannot answer
+approvals, delete anything or change settings. Settings, Apps shows what
+to paste.
+
 **Always on.** Agents run where Bloks runs, and a laptop sleeps. Bloks
 keeps the Mac awake while an agent is mid-turn and picks a turn back up
 after a sleep. For agents that never stop, `bloks-server` runs the whole

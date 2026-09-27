@@ -58,6 +58,15 @@ export function MemoryPanel() {
     state.memoryBotId ?? (waiting > 0 ? "you" : null) ?? viewing ?? agents[0]?.id ?? null,
   );
   const aboutYou = botId === "you";
+  // the notes arrive a moment after the panel opens; suggestions waiting
+  // on you are where it should open, unless somewhere else was asked for
+  const [picked, setPicked] = useState(Boolean(state.memoryBotId));
+  useEffect(() => {
+    if (!picked && waiting > 0) {
+      setBotId("you");
+      setPicked(true);
+    }
+  }, [picked, waiting]);
   const [tab, setTab] = useState<Tab>("files");
   const bot = agents.find((b) => b.id === botId) ?? null;
   const close = () => dispatch({ type: "toggleMemory", open: false, botId: null });
@@ -98,7 +107,10 @@ export function MemoryPanel() {
         <div className="flex min-h-0 flex-1">
           <nav className="hidden w-[200px] shrink-0 overflow-y-auto border-r p-2 sm:block" aria-label="Agents">
             <button
-              onClick={() => setBotId("you")}
+              onClick={() => {
+                setPicked(true);
+                setBotId("you");
+              }}
               className={cn(
                 "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors",
                 aboutYou ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -115,7 +127,10 @@ export function MemoryPanel() {
             {agents.map((agent) => (
               <button
                 key={agent.id}
-                onClick={() => setBotId(agent.id)}
+                onClick={() => {
+                  setPicked(true);
+                  setBotId(agent.id);
+                }}
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors",
                   agent.id === botId ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",

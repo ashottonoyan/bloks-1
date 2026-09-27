@@ -41,7 +41,7 @@ export interface Brief {
   parts: BriefPart[];
   waiting: BriefWaiting[];
   spend: { turns: number; cost: number; costKnown: boolean };
-  ready: Array<{ label: string; count: number }>;
+  ready: Array<{ label: string; many?: string; count: number }>;
   quiet: boolean;
   readAt?: number;
 }
@@ -293,7 +293,7 @@ export function BriefPanel() {
                 <div className="flex flex-wrap gap-2 text-[12px] text-muted-foreground">
                   {brief.ready.map((r) => (
                     <span key={r.label} className="rounded-full bg-muted px-2.5 py-1">
-                      {r.count} {r.count === 1 ? r.label : `${r.label}s`} ready
+                      {r.count} {r.count === 1 ? r.label : (r.many ?? `${r.label}s`)} ready
                     </span>
                   ))}
                   {brief.spend.turns > 0 && (

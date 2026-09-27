@@ -182,6 +182,78 @@ Rooms export to it, imports go through it, and the gallery at
 bloks.dev/teams is checked with the same parser before anything reaches
 the hire dialog.
 
+## The morning brief
+
+`server/brief.ts` composes a brief from what is already stored: each
+agent's lanes since the last brief (the last reply's first sentences and
+how many files its change cards touched), the live questions and
+approvals (`waitingOnYou`), the day's usage buckets, and counts of things
+ready for a look. No model call. A minute timer makes one when the chosen
+time has passed and today's has not been made (`briefDue`), and a
+`brief.ready` frame wakes the owner's phone with a sealed preview.
+`/api/briefs/:id/parts/:n/audio` speaks one part in that agent's voice,
+or a Mac voice picked per agent.
+
+## Watchers
+
+`server/watchers.ts` looks at a folder (a snapshot of names, sizes and
+times, compared), a page (its readable text, hashed, with the new lines
+as the change, optionally only when it mentions something) or a feed
+(RSS or Atom entries not seen before). Folders are watched with
+`fs.watch` and settle for twenty seconds; everything is also looked at on
+its `every`. A first look is a baseline. A change becomes a turn in the
+watcher's own lane, or a rehearsal (`openRehearsals`), with the message
+marked `via: "watcher"`. A look is skipped while the agent is busy, so
+its own edits are not news to it, and `mayFire` caps a watcher at six
+turns an hour.
+
+## Meeting notes
+
+`electron/resources/speech-helper.swift --meeting [--system]` transcribes
+the microphone and, through ScreenCaptureKit (weakly linked, macOS 13+),
+the Mac's own sound, closing a recognition request at each pause so every
+stretch of speech is a segment. The renderer posts segments to
+`/api/meetings/:id/segments`; ending the meeting gives the chosen agent a
+turn in its Meetings lane with `notesPrompt`, and `actionItems` reads
+"- Owner: task" lines back out of the reply for one-press handoff.
+
+## Recall and notes about the person
+
+`server/recall.ts` searches an agent's own lanes and the rooms it is in
+(only the room itself, from a lane of a shared room), words in any
+order, with the message before each hit. Agents reach it with the CLI's
+`recall` and chat engines with the `search_history` tool.
+`server/profile-notes.ts` holds suggested and kept notes about the
+person; agents suggest with `note` or `note_about_person` (three a turn),
+only kept notes reach the prompt, and never in a shared room.
+
+## Engine scout
+
+`server/engine-report.ts` logs every finished turn with the engine and
+model that ran it, and reads its outcome later from existing records:
+undone (the checkpoint was reverted), rewound, discarded (a rehearsal),
+failed, or out (the engine ran out). A lighter model in the same family
+with at least eight judged turns and a kept rate within five points is
+suggested for that agent.
+
+## Email your agent
+
+Mail to `<agent>.<id>@agents.bloks.dev` is received by Bloks Cloud and
+arrives as a `hook:` ask with `platform: "email"`, like WhatsApp.
+`onEmailHook` routes it by the name before the dot, checks `allowFrom`,
+dedupes by Message-ID, and queues it into the agent's Email lane; the
+reply is the agent's last message, sent back through Bloks Cloud, which
+only sends to an address that wrote in.
+
+## MCP server
+
+`bin/bloks-mcp.mjs` is a dependency-free stdio MCP server that finds the
+local Bloks on its known ports and offers eight tools (list agents and
+rooms, ask an agent and wait for the reply, post in a room, read a
+conversation, search, the latest brief, what is waiting). It has no tool
+that approves, deletes or configures. `/api/mcp-config` gives the command
+to paste, using the runtime the server itself runs on.
+
 ## Boundaries worth knowing
 
 - `server/http-guard.ts` checks `Origin` and `Host` on every request.

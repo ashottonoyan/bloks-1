@@ -72,7 +72,7 @@ export interface WakePreview {
   title: string;
   body: string;
   /** "approval" gets Allow and Deny on the lock screen. */
-  category?: "approval" | "question" | "mention";
+  category?: "approval" | "question" | "mention" | "brief";
   botId?: string;
   requestId?: string;
   threadId?: string;

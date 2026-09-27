@@ -106,3 +106,22 @@ describe("through the server", () => {
     assert.ok(list.briefs[0].readAt);
   });
 });
+
+describe("what counts", () => {
+  test("a greeting nobody asked for is not work, and plurals read right", () => {
+    const now = Date.now();
+    const brief = composeBrief(
+      {
+        since: now - 3_600_000,
+        now,
+        agents: [{ id: "n", name: "Nova", lanes: [{ threadId: "t", title: "General", messages: [{ at: now - 1000, role: "bot", kind: "text", text: "I'm Nova, ready when you are." }] }] }],
+        waiting: [],
+        spend: { turns: 0, cost: 0, costKnown: false },
+        ready: [{ label: "note about you", many: "notes about you", count: 2 }],
+      },
+      "b",
+    );
+    assert.equal(brief.parts.filter((p) => p.botId).length, 0);
+    assert.match(brief.parts[brief.parts.length - 1].script, /2 notes about you ready for a look/);
+  });
+});

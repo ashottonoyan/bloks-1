@@ -58,6 +58,27 @@ const COMMANDS = {
       }
     },
   },
+  recall: {
+    use: "recall <words…>",
+    about: "look something up in your own past conversations: a decision, a name, a preference",
+    run: async (args) => {
+      const words = args.join(" ").trim();
+      if (!words) throw new Error("recall needs something to look for");
+      const me = await request("GET", "/api/agent/whoami");
+      const { hits } = await request("GET", `/api/bots/${me.botId ?? me.id}/recall?q=${encodeURIComponent(words)}`);
+      return hits;
+    },
+  },
+  note: {
+    use: 'note "<one short fact about the person>"',
+    about: "suggest a lasting note about the person you work for; they decide whether to keep it",
+    run: async (args) => {
+      const text = args.join(" ").trim();
+      if (!text) throw new Error("note needs the fact to suggest");
+      const me = await request("GET", "/api/agent/whoami");
+      return request("POST", `/api/bots/${me.botId ?? me.id}/notes`, { text });
+    },
+  },
   hire: {
     use: 'hire --name <name> --title <role> [--about <description>] [--skills "a,b,c"]',
     about: "add a teammate to the workspace",

@@ -342,6 +342,9 @@ export interface AppState {
   /** The Rehearsals panel, and a counter bumped when any rehearsal moves. */
   rehearsalsOpen: boolean;
   rehearsalsTick: number;
+  /** Bumped when the server says a kind of thing changed (notes about
+   * you, briefs, watchers, meetings), so whatever shows it re-reads. */
+  ticks: Record<string, number>;
   routinesOpen: boolean;
   newRoomOpen: boolean;
   projectsOpen: boolean;
@@ -422,6 +425,7 @@ export type Action =
   | { type: "toggleMemory"; open?: boolean; botId?: string | null }
   | { type: "toggleRehearsals"; open?: boolean }
   | { type: "rehearsalsChanged" }
+  | { type: "tick"; key: string }
   | { type: "openProject"; id: string | null }
   | {
       type: "updateBot";
@@ -545,6 +549,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, rehearsalsOpen: action.open ?? !state.rehearsalsOpen };
     case "rehearsalsChanged":
       return { ...state, rehearsalsTick: state.rehearsalsTick + 1 };
+    case "tick":
+      return { ...state, ticks: { ...state.ticks, [action.key]: (state.ticks[action.key] ?? 0) + 1 } };
     case "toggleMemory":
       return {
         ...state,
@@ -819,6 +825,7 @@ export const initialState: AppState = {
   memoryBotId: null,
   rehearsalsOpen: false,
   rehearsalsTick: 0,
+  ticks: {},
   routinesOpen: false,
   newRoomOpen: false,
   projectsOpen: false,

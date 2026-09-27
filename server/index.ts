@@ -237,6 +237,8 @@ import { describe as describeRoutine, MAX_ROUTINES, normalize as normalizeRoutin
 import { engineIsFresh, freshTurnText } from "./turn-context.ts";
 import { Checkpoints, diffLines, trackable, type CheckpointRecord } from "./checkpoints.ts";
 import { Cooldowns, describeRest, outReason, REASON_WORDS, type Rest } from "./failover.ts";
+import { recall, recallText, type RecallSource } from "./recall.ts";
+import { noteBriefing, ProfileNotes } from "./profile-notes.ts";
 import { MemoryJournal } from "./memory-journal.ts";
 import { Rehearsals, type Rehearsal } from "./rehearsals.ts";
 import { summarize, UsageStore } from "./usage.ts";
@@ -343,6 +345,24 @@ const jobs = new JobStore();
 const projects = new ProjectStore();
 const workflows = new WorkflowStore();
 const proposals = new ProposalStore();
+// Notes about the person, suggested by agents and kept by them
+// (server/profile-notes.ts), and how many each running turn has offered.
+const profileNotes = new ProfileNotes(join(DATA_DIR, "profile-notes.json"));
+const notesThisTurn = new Map<string, number>();
+/** A turn offers a few notes at most: more than that is chatter. */
+const NOTES_PER_TURN = 3;
+
+/** An agent's suggestion about the person, from either route. */
+function suggestNote(bot: BotRecord, text: unknown, laneId?: string | null): string {
+  const lane = laneId ?? "";
+  const offered = notesThisTurn.get(lane) ?? 0;
+  if (offered >= NOTES_PER_TURN) return "That is enough notes for one turn. Keep working.";
+  const note = profileNotes.suggest(text, { id: bot.id, name: bot.name }, laneId ?? undefined);
+  if (!note) return "Not added: it is empty, already known, or there are too many suggestions waiting for them.";
+  notesThisTurn.set(lane, offered + 1);
+  broadcast({ kind: "profile" });
+  return "Suggested. They will see it and decide whether to keep it.";
+}
 const policy = new PolicyStore();
 const wheel = new Wheel();
 
@@ -524,6 +544,17 @@ function engineUsable(selection: ModelSelection | null | undefined): selection i
   if (!selection?.instanceId) return false;
   const instance = registry.get(selection.instanceId);
   return Boolean(instance && instance.enabled !== false && !cooldowns.of(selection.instanceId));
+}
+
+/**
+ * The engine running a lane's turn right now, which is where anything
+ * about that turn (an answer, an approval, an interrupt) has to go. Not
+ * always the agent's own: a backup may be answering, or the person may
+ * have changed the model since the turn began.
+ */
+function laneInstance(bot: { modelSelection: ModelSelection }, laneId?: string | null) {
+  const running = laneId ? laneEngine.get(laneId) : undefined;
+  return registry.get(running?.instanceId ?? bot.modelSelection.instanceId);
 }
 
 function engineName(selection: ModelSelection): string {
@@ -999,6 +1030,28 @@ bus.subscribe((event: RuntimeEvent) => {
     case "request.opened": {
       // the agent asking for an app: plant sign-in cards and answer the
       // tool right away so the model can wrap up instead of blocking
+      // a note about the person, suggested for them to keep or not
+      if (event.tool === "note_about_person" && event.requestId) {
+        const inShared = bloks.bloks.some((b) => b.sharing && b.lanes?.[bot.id] === event.threadId);
+        const answer = inShared
+          ? "Not in a shared room: notes about the person are private to them."
+          : suggestNote(bot, (event.input as { fact?: unknown } | undefined)?.fact, event.threadId);
+        void laneInstance(bot, event.threadId)
+          ?.adapter.respondToRequest(event.threadId, event.requestId, { behavior: "answer", message: answer })
+          .catch(() => {});
+        break;
+      }
+      // looking something up in its own past: answered straight away
+      if (event.tool === "search_history" && event.requestId) {
+        const query = String((event.input as { query?: unknown } | undefined)?.query ?? "").slice(0, 300);
+        void laneInstance(bot, event.threadId)
+          ?.adapter.respondToRequest(event.threadId, event.requestId, {
+            behavior: "answer",
+            message: recallText(recallFor(bot, query, event.threadId), query),
+          })
+          .catch(() => {});
+        break;
+      }
       if (
         (event.tool === "request_connection" || event.tool === "request_secret") &&
         event.requestId
@@ -1017,7 +1070,7 @@ bus.subscribe((event: RuntimeEvent) => {
                 event.requestId,
                 (event.input as { name?: unknown; hint?: unknown } | undefined) ?? {},
               );
-        const instance = registry.get(bot.modelSelection.instanceId);
+        const instance = laneInstance(bot, event.threadId);
         void instance?.adapter
           .respondToRequest(event.threadId, event.requestId, { behavior: "answer", message: answer })
           .catch(() => {});
@@ -1049,7 +1102,7 @@ bus.subscribe((event: RuntimeEvent) => {
         // no longer what should happen.
         const hold = wheel.heldBy(bot.id);
         if (hold) {
-          const instance = registry.get(bot.modelSelection.instanceId);
+          const instance = laneInstance(bot, event.threadId);
           void instance?.adapter
             .respondToRequest(event.threadId, event.requestId, {
               behavior: "deny",
@@ -1070,7 +1123,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const decision = decide(policy.list(), target);
         if (decision.verdict === "deny" || (decision.verdict === "allow" && !byMember)) {
           const allowed = decision.verdict === "allow";
-          const instance = registry.get(bot.modelSelection.instanceId);
+          const instance = laneInstance(bot, event.threadId);
           void instance?.adapter
             .respondToRequest(event.threadId, event.requestId, {
               behavior: allowed ? "allow" : "deny",
@@ -1119,7 +1172,7 @@ bus.subscribe((event: RuntimeEvent) => {
           event.tool ?? "",
         );
         if (!byMember && (mode === "auto" || (mode === "edits" && editish))) {
-          const instance = registry.get(bot.modelSelection.instanceId);
+          const instance = laneInstance(bot, event.threadId);
           void instance?.adapter
             .respondToRequest(event.threadId, event.requestId, { behavior: "allow" })
             .catch(() => {});
@@ -2017,6 +2070,10 @@ async function startTurn(
     (!sharing || sharing.memoryFor?.includes(bot.id)) &&
       cfg.profile?.about?.trim() &&
       `About the person you work for: ${cfg.profile.about.trim()}`,
+    // what every agent has learned about them and they confirmed, and how
+    // to add to it; never in a room other people are reading
+    !sharing && profileNotes.prompt(),
+    !sharing && noteBriefing(runsAProcess(instance.driverKind) ? `node "${AGENT_CLI}"` : null),
     (!sharing || sharing.memoryFor?.includes(bot.id)) && workspace.memoryPrompt(bot.id),
     sharing && sharedBriefing(sharedRoom!, sharing, roomTools),
     `Deliverables: when you produce a file for the user (a report, web page, slide deck, spreadsheet, PDF, chart), save it to ${artifacts.artifactsDir(bot.id)} with a descriptive filename. Files saved there appear in the chat as cards the user can open in-app or download. HTML, PDF, images, CSV, XLSX, markdown and text all render in-app; for slide decks, save an HTML version alongside any .pptx so the deck is viewable in place.`,
@@ -2053,6 +2110,7 @@ async function startTurn(
   // HTTP request must never be the thing holding that open.
   store.setTaskBusy(task.id, true);
   turnStarted.set(task.id, Date.now());
+  notesThisTurn.delete(task.id);
   store.patchBot(bot.id, { unread: false });
   artifactBaseline.set(task.id, artifacts.snapshot(bot.id));
   turnTokens.delete(task.id);
@@ -2477,6 +2535,33 @@ function sharedLaneFor(bot: BotRecord, blok: BlokRecord) {
   bloks.setLane(blok.id, bot.id, made.id);
   broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
   return store.bot(bot.id)!.tasks.find((t) => t.id === made.id)!;
+}
+
+/**
+ * What an agent can look back through (server/recall.ts): its own lanes
+ * and the rooms it sits in. A lane that belongs to a room shared with
+ * other people reaches that room only, so a guest cannot ask their way
+ * into the owner's private conversations.
+ */
+function recallSources(bot: BotRecord, laneId?: string | null): RecallSource[] {
+  const sharedRoom = laneId ? bloks.bloks.find((b) => b.sharing && b.lanes?.[bot.id] === laneId) : undefined;
+  if (sharedRoom) return [{ threadId: sharedRoom.id, where: `room ${sharedRoom.name}`, messages: store.messagesFor(sharedRoom.id) }];
+  const sharedLanes = new Set(bloks.bloks.filter((b) => b.sharing).map((b) => b.lanes?.[bot.id]).filter(Boolean));
+  const sources: RecallSource[] = bot.tasks
+    .filter((task) => !sharedLanes.has(task.id))
+    .map((task) => ({ threadId: task.id, where: `your conversation "${task.title}"`, messages: store.messagesFor(task.id) }));
+  for (const room of bloks.bloks) {
+    if (room.sharing || !room.memberIds.includes(bot.id)) continue;
+    sources.push({ threadId: room.id, where: `room ${room.name}`, messages: store.messagesFor(room.id) });
+  }
+  return sources;
+}
+
+function recallFor(bot: BotRecord, query: string, laneId?: string | null, limit = 8) {
+  const person = cfg.profile?.name?.trim() || "the person";
+  return recall(query, recallSources(bot, laneId), (message) =>
+    message.role === "user" ? person : message.from ? (store.bot(message.from)?.name ?? "an agent") : bot.name,
+  limit);
 }
 
 /** The owner's name as members see it. */
@@ -3842,8 +3927,8 @@ async function telegramRound(): Promise<void> {
       }
       telegramAsks.delete(decision.chatId);
       const asked = store.bot(waiting.botId);
-      const instance = asked ? registry.get(asked.modelSelection.instanceId) : null;
       const askThread = askThreadByRequest.get(waiting.requestId) ?? asked?.threadId ?? "";
+      const instance = asked ? laneInstance(asked, askThread) : null;
       const behavior = waiting.permission
         ? read.option === waiting.options[0] ? "allow" : "deny"
         : "answer";
@@ -4683,8 +4768,8 @@ async function serveMember(
       if (approval) {
         if (answer !== "Allow" && answer !== "Deny") return json(res, 400, { error: "Allow or Deny" });
         const bot = message.from ? store.bot(message.from) : null;
-        const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
         const askThread = message.card.requestId ? askThreadByRequest.get(message.card.requestId) : undefined;
+        const instance = bot ? laneInstance(bot, askThread) : null;
         if (!bot || !instance || !askThread || !message.card.requestId) {
           return json(res, 409, { error: "that request has closed" });
         }
@@ -4699,8 +4784,8 @@ async function serveMember(
       }
       if (message.card.requestId) {
         const bot = message.from ? store.bot(message.from) : null;
-        const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
         const askThread = askThreadByRequest.get(message.card.requestId);
+        const instance = bot ? laneInstance(bot, askThread) : null;
         if (!bot || !instance || !askThread) return json(res, 409, { error: "that question has closed" });
         await instance.adapter
           .respondToRequest(askThread, message.card.requestId, { behavior: "answer", message: `${who.name} answered: ${answer}` })
@@ -5310,7 +5395,7 @@ const server = createServer(async (req, res) => {
 
       // Whatever happens next, it stops working now.
       for (const lane of bot.tasks.filter((t) => t.busy)) {
-        await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(lane.id).catch(() => {});
+        await laneInstance(bot, lane.id)?.adapter.interruptTurn(lane.id).catch(() => {});
       }
       stopScreenPoller(bot.id);
       terminals.close(bot.id);
@@ -5371,6 +5456,7 @@ const server = createServer(async (req, res) => {
       });
       forgetIdentity(bot.id);
       proposals.removeForBot(bot.id);
+      profileNotes.forgetSuggestionsBy(bot.id);
       policy.removeForBot(bot.id);
       artifactComments.removeForBot(bot.id);
       projects.removeMember(bot.id);
@@ -6640,10 +6726,10 @@ const server = createServer(async (req, res) => {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such agent" });
       const body = await readBody(req);
-      const instance = registry.get(bot.modelSelection.instanceId);
-      if (!instance) return json(res, 409, { error: "provider unavailable" });
       const requestId = String(body.requestId);
       const askThread = askThreadByRequest.get(requestId) ?? bot.threadId;
+      const instance = laneInstance(bot, askThread);
+      if (!instance) return json(res, 409, { error: "provider unavailable" });
       try {
         await instance.adapter.respondToRequest(askThread, requestId, {
           behavior: body.behavior,
@@ -6680,13 +6766,12 @@ const server = createServer(async (req, res) => {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such agent" });
       const body = await readBody(req).catch(() => ({}) as Record<string, unknown>);
-      const instance = registry.get(bot.modelSelection.instanceId);
       // a named lane is interruptible even when another lane is on screen
       const laneId =
         typeof body.taskId === "string" && bot.tasks.some((t) => t.id === body.taskId)
           ? body.taskId
           : bot.threadId;
-      await instance?.adapter.interruptTurn(laneId);
+      await laneInstance(bot, laneId)?.adapter.interruptTurn(laneId);
       return json(res, 200, { ok: true });
     }
 
@@ -7452,6 +7537,55 @@ const server = createServer(async (req, res) => {
     // A linear scan over the in-memory message stores. At personal-app
     // scale that is thousands of rows, not millions; an index would be
     // more machinery than the data deserves.
+    // ── what your agents know about you ──
+    if (method === "GET" && path === "/api/profile/notes") {
+      return json(res, 200, { notes: profileNotes.list() });
+    }
+    if (method === "POST" && path === "/api/profile/notes") {
+      if (asAgent) return json(res, 403, { error: "an agent suggests notes, it does not keep them" });
+      const body = await readBody(req);
+      const note = profileNotes.add(body.text);
+      if (!note) return json(res, 400, { error: "a note needs a few words, and the list holds 60" });
+      broadcast({ kind: "profile" });
+      return json(res, 201, { note });
+    }
+    m = path.match(/^\/api\/profile\/notes\/([\w-]+)\/keep$/);
+    if (m && method === "POST") {
+      if (asAgent) return json(res, 403, { error: "an agent suggests notes, it does not keep them" });
+      const body = await readBody(req).catch(() => ({}) as Record<string, unknown>);
+      const note = profileNotes.keep(m[1], typeof body.text === "string" ? body.text : undefined);
+      if (!note) return json(res, 404, { error: "no such note, or the list is full" });
+      broadcast({ kind: "profile" });
+      return json(res, 200, { note });
+    }
+    m = path.match(/^\/api\/profile\/notes\/([\w-]+)$/);
+    if (m && method === "DELETE") {
+      if (asAgent) return json(res, 403, { error: "an agent cannot remove notes" });
+      const ok = profileNotes.remove(m[1]);
+      if (ok) broadcast({ kind: "profile" });
+      return json(res, ok ? 200 : 404, ok ? { ok: true } : { error: "no such note" });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/notes$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such agent" });
+      const body = await readBody(req);
+      return json(res, 200, { result: suggestNote(bot, body.text, asAgent?.taskId) });
+    }
+
+    // An agent's own past, for the command line (server/recall.ts). The
+    // agent guard only lets an agent ask about itself; the lane decides
+    // how far back it may look.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/recall$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such agent" });
+      const q = (url.searchParams.get("q") ?? "").trim().slice(0, 300);
+      if (!q) return json(res, 400, { error: "recall needs something to look for" });
+      const limit = Number(url.searchParams.get("limit")) || 8;
+      return json(res, 200, { hits: recallFor(bot, q, asAgent?.taskId, limit) });
+    }
+
     if (method === "GET" && path === "/api/search") {
       const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
       const limit = Math.max(1, Math.min(50, Number(url.searchParams.get("limit")) || 20));

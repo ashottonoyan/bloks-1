@@ -15,6 +15,8 @@ import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import Undo2 from "lucide-react/dist/esm/icons/undo-2.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
+import UserRound from "lucide-react/dist/esm/icons/user-round.mjs";
+import { AboutYou, useProfileNotes } from "./AboutYou";
 import { api, useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "./Avatar";
 import { Button } from "@/components/ui/button";
@@ -49,7 +51,13 @@ export function MemoryPanel() {
   const agents = useMemo(() => state.bots.filter((b) => !b.hidden), [state.bots]);
   // opens on the agent being looked at, when that is an agent
   const viewing = agents.find((a) => a.id === state.selectedId)?.id;
-  const [botId, setBotId] = useState<string | null>(state.memoryBotId ?? viewing ?? agents[0]?.id ?? null);
+  // "you" is the notes about the person, shared by every agent
+  const { notes } = useProfileNotes();
+  const waiting = (notes ?? []).filter((n) => n.state === "suggested").length;
+  const [botId, setBotId] = useState<string | null>(
+    state.memoryBotId ?? (waiting > 0 ? "you" : null) ?? viewing ?? agents[0]?.id ?? null,
+  );
+  const aboutYou = botId === "you";
   const [tab, setTab] = useState<Tab>("files");
   const bot = agents.find((b) => b.id === botId) ?? null;
   const close = () => dispatch({ type: "toggleMemory", open: false, botId: null });
@@ -89,6 +97,21 @@ export function MemoryPanel() {
 
         <div className="flex min-h-0 flex-1">
           <nav className="hidden w-[200px] shrink-0 overflow-y-auto border-r p-2 sm:block" aria-label="Agents">
+            <button
+              onClick={() => setBotId("you")}
+              className={cn(
+                "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors",
+                aboutYou ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+              )}
+            >
+              <span className="flex size-[22px] items-center justify-center rounded-md bg-muted">
+                <UserRound size={13} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">About you</span>
+              {waiting > 0 && (
+                <span className="rounded-md bg-primary/12 px-1.5 py-0.5 text-[10.5px] tabular-nums text-foreground">{waiting}</span>
+              )}
+            </button>
             {agents.map((agent) => (
               <button
                 key={agent.id}
@@ -112,13 +135,14 @@ export function MemoryPanel() {
                 onChange={(e) => setBotId(e.target.value)}
                 aria-label="Agent"
               >
+                <option value="you">About you</option>
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
                   </option>
                 ))}
               </select>
-              <div className="flex gap-1 rounded-lg bg-muted p-0.5">
+              <div className={cn("flex gap-1 rounded-lg bg-muted p-0.5", aboutYou && "hidden")}>
                 {(
                   [
                     ["files", "Files", FileText],
@@ -140,7 +164,9 @@ export function MemoryPanel() {
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              {!bot ? (
+              {aboutYou ? (
+                <AboutYou />
+              ) : !bot ? (
                 <div className="py-10 text-center text-[13px] text-muted-foreground">No agents yet.</div>
               ) : tab === "files" ? (
                 <Files key={bot.id} bot={bot} />

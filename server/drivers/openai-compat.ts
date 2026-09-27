@@ -146,6 +146,32 @@ function toolSchemas(hasComputer: boolean, hasSandbox: boolean) {
     {
       type: "function",
       function: {
+        name: "search_history",
+        description:
+          "Search your own past conversations with this person and the rooms you are in. Use it when something may have come up before: a decision, a name, a number, a preference. Returns the matching messages with when and where they were said.",
+        parameters: {
+          type: "object",
+          properties: { query: { type: "string", description: "A few words to look for, in any order" } },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "note_about_person",
+        description:
+          "Suggest one short, lasting note about the person you work for (how they like answers, their role, their timezone, names they use). They decide whether to keep it. Never secrets or anything sensitive.",
+        parameters: {
+          type: "object",
+          properties: { fact: { type: "string", description: "One fact, one sentence" } },
+          required: ["fact"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "request_secret",
         description:
           "Ask the user for an API key or other secret via a secure field in the chat. The value reaches your tools as an environment variable on your next turn and never appears in the conversation. After calling this, wrap up your turn; the task resumes when they save it.",
@@ -546,7 +572,7 @@ export function openAiCompatDriver(spec: ProviderSpec): ProviderDriver<CompatCon
               type: "item.started",
               itemType: "tool",
               itemId: call.id,
-              title: name === "ask_user" ? "ask_user" : `${name}: ${String(args.command ?? args.url ?? "").slice(0, 60)}`,
+              title: name === "ask_user" ? "ask_user" : `${name}: ${String(args.command ?? args.url ?? args.query ?? args.fact ?? "").slice(0, 60)}`,
             });
 
             let result: string;
@@ -557,6 +583,8 @@ export function openAiCompatDriver(spec: ProviderSpec): ProviderDriver<CompatCon
               result = await requestConnection(threadId, turnId, args);
             } else if (name === "request_secret") {
               result = await requestSecret(threadId, turnId, args);
+            } else if (name === "search_history" || name === "note_about_person") {
+              result = await askWorkspace(threadId, turnId, name, args ?? {});
             } else if (name === "sandbox_exec" && sandbox) {
               result = await sandboxExec(sandbox, String(args.command ?? ""));
             } else if (name === "computer_exec" && computer) {
@@ -671,6 +699,26 @@ export function openAiCompatDriver(spec: ProviderSpec): ProviderDriver<CompatCon
             input: { name: args.name, hint: args.hint },
             summary: "Request a secret",
           });
+        });
+      };
+
+      /** A tool the workspace answers itself, straight away: no card, no
+       * person. The server replies through respondToRequest. */
+      const askWorkspace = (threadId: string, turnId: string, tool: string, input: Record<string, unknown>): Promise<string> => {
+        const requestId = newId();
+        return new Promise<string>((resolve) => {
+          const entry = active.get(threadId);
+          if (!entry) return resolve("The workspace did not answer.");
+          const timer = setTimeout(() => {
+            entry.asks.delete(requestId);
+            resolve("The workspace did not answer in time.");
+          }, 30_000);
+          entry.asks.set(requestId, (answer) => {
+            clearTimeout(timer);
+            entry.asks.delete(requestId);
+            resolve(answer);
+          });
+          emit({ ...base(threadId, turnId), type: "request.opened", requestId, requestType: "question", tool, input, summary: tool });
         });
       };
 

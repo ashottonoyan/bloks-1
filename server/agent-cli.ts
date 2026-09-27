@@ -99,6 +99,8 @@ export const RULES: Rule[] = [
 
   // Its own notes, and nobody else's.
   { method: "GET", path: "/api/bots/:me/memory", why: "read its own memory" },
+  { method: "GET", path: "/api/bots/:me/recall", why: "look something up in its own past conversations" },
+  { method: "POST", path: "/api/bots/:me/notes", why: "suggest a short note about the person, for them to keep or not" },
   { method: "PUT", path: "/api/bots/:me/memory", why: "write its own memory" },
   { method: "GET", path: "/api/bots/:me/artifacts", why: "list what it has produced" },
 
@@ -129,6 +131,7 @@ export const NEVER = [
   "/api/calls",
   "/api/terminal",
   "/api/usage",
+  "/api/profile",
 ];
 
 const PATH_PART = /^[\w.-]+$/;
@@ -314,6 +317,7 @@ export function cliBriefing(command: string): string {
   return [
     `You can act on this workspace yourself, not only describe what should happen. Run \`${command} help\` to see how.`,
     "Use it when you have decided something needs doing: hiring a teammate, opening a room, filing a routine, posting a job, saying something to another agent.",
+    `When something may have come up before (a decision, a name, a preference), \`${command} recall <words>\` searches your past conversations.`,
     "It answers JSON. Your credential is already in the environment and only lasts this turn.",
   ].join(" ");
 }

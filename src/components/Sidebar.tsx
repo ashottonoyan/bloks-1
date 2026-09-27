@@ -33,6 +33,7 @@ import { cn } from "@/lib/cn";
 import { usePageVisible } from "@/lib/pageVisible";
 import { previewLine } from "@/lib/preview";
 import { inSection, sectionNames } from "@/lib/sections";
+import { useProfileNotes } from "./AboutYou";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -474,6 +475,7 @@ export function Sidebar() {
   const [filing, setFiling] = useState<FilingState | null>(null);
   const activity = useActivityCount();
   const rehearsalsReady = useRehearsalsReady();
+  const notesWaiting = (useProfileNotes().notes ?? []).filter((n) => n.state === "suggested").length;
   const [showArchived, setShowArchived] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -901,6 +903,17 @@ export function Sidebar() {
                 title={`${rehearsalsReady} ready to review`}
               >
                 {rehearsalsReady}
+              </span>
+            )}
+            {label === "Memory" && notesWaiting > 0 && (
+              <span
+                className={cn(
+                  "ml-auto rounded-md bg-primary/12 px-1.5 py-0.5 text-[10.5px] tabular-nums text-foreground",
+                  rail && "absolute right-1 top-0.5 ml-0 px-1",
+                )}
+                title={`${notesWaiting} ready to review`}
+              >
+                {notesWaiting}
               </span>
             )}
             {((label === "Activity" && (activity.waiting > 0 || activity.running > 0)) ||

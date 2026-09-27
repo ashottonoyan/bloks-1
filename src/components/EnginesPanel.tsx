@@ -15,6 +15,7 @@ import { ProviderMark } from "./ProviderIcons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
+import { EngineReport } from "./EngineReport";
 
 const AUTH_NOTE: Record<ProviderRow["auth"], string> = {
   oauth: "Browser sign-in",
@@ -226,6 +227,7 @@ export function EnginesPanel() {
           rows={chat}
         />
       </div>
+      <EngineReport />
       <CustomEndpoints />
     </>
   );

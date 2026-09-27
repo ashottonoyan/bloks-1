@@ -29,6 +29,7 @@ import { BrowseFolderButton } from "@/components/ui/browse-folder";
 import { InfoTip } from "@/components/ui/info-tip";
 import { cn } from "@/lib/cn";
 import { thisComputer } from "@/lib/thisComputer";
+import { EngineSuggestionCard, useEngineReport } from "./EngineReport";
 
 function Field({
   label,
@@ -195,6 +196,7 @@ function SkillsEditor({ bot }: { bot: Bot }) {
 
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
+  const suggestion = useEngineReport()?.suggestions.find((s) => s.botId === bot.id);
   const patch = (
     p: Partial<
       Pick<
@@ -508,6 +510,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </div>
             <ModelPicker bot={bot} />
           </div>
+          {suggestion && <EngineSuggestionCard s={suggestion} compact />}
 
           <div className="flex items-center justify-between gap-4 rounded-2xl border bg-card p-4">
             <div>

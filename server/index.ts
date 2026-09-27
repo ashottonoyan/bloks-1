@@ -242,6 +242,7 @@ import { recall, recallText, type RecallSource } from "./recall.ts";
 import { noteBriefing, ProfileNotes } from "./profile-notes.ts";
 import { briefDue, composeBrief, parseBriefTime, type Brief, type BriefWaiting } from "./brief.ts";
 import { localDate } from "./usage.ts";
+import { engineReport, TurnLogStore, type Outcome, type TurnLog } from "./engine-report.ts";
 import {
   cleanWatcher,
   describeFolderChanges,
@@ -362,6 +363,8 @@ const jobs = new JobStore();
 const projects = new ProjectStore();
 const workflows = new WorkflowStore();
 const proposals = new ProposalStore();
+// Every finished turn, with the engine that ran it (server/engine-report.ts).
+const turnLog = new TurnLogStore(join(DATA_DIR, "engine-turns.json"));
 // Notes about the person, suggested by agents and kept by them
 // (server/profile-notes.ts), and how many each running turn has offered.
 const profileNotes = new ProfileNotes(join(DATA_DIR, "profile-notes.json"));
@@ -1516,11 +1519,32 @@ bus.subscribe((event: RuntimeEvent) => {
       // what the turn changed in the agent's memory, into its journal
       const remembered = memoryJournal.finish(event.threadId);
       if (remembered.length) broadcast({ kind: "memory.changed", botId: bot.id, changes: remembered.length });
+      // the turn, for the engine report: which engine, what it cost, and
+      // (once the card exists) the checkpoint its outcome is read from
+      const ranOn = laneEngine.get(event.threadId) ?? bot.modelSelection;
+      const loggedTurn: TurnLog = {
+        id: newId(),
+        at: Date.now(),
+        startedAt: turnStarted.get(event.threadId) ?? Date.now(),
+        botId: bot.id,
+        laneId: event.threadId,
+        instanceId: ranOn.instanceId,
+        model: ranOn.model,
+        ok: event.ok !== false,
+        ...(event.ok === false && outReason([...(turnErrors.get(event.threadId) ?? []), event.stopReason ?? ""].join("\n"))
+          ? { out: true }
+          : {}),
+        input: spent?.input ?? 0,
+        output: spent?.output ?? 0,
+        cost: typeof event.cost === "number" ? event.cost : null,
+      };
+      turnLog.add(loggedTurn);
       // what the turn did to its folder, as a card with the way back
       const rehearsing = rehearsals.byTask(event.threadId);
       void checkpoints
         .finish(event.threadId)
         .then(async (record) => {
+          if (record) turnLog.attachCheckpoint(loggedTurn.id, record.id);
           if (rehearsing) {
             await settleRehearsalTurn(rehearsing, record, event.ok !== false, pushMessage);
             return;
@@ -5816,6 +5840,7 @@ const server = createServer(async (req, res) => {
       forgetIdentity(bot.id);
       proposals.removeForBot(bot.id);
       profileNotes.forgetSuggestionsBy(bot.id);
+      turnLog.forgetBot(bot.id);
       for (const w of watchers.filter((x) => x.botId === bot.id)) disarmWatcher(w.id);
       watchers = watchers.filter((x) => x.botId !== bot.id);
       saveWatchers();
@@ -7918,6 +7943,31 @@ const server = createServer(async (req, res) => {
       const w = watchers.find((x) => x.id === m![1]);
       if (!w || (asAgent && w.botId !== asAgent.botId)) return json(res, 404, { error: "no such watcher" });
       return json(res, 200, await checkWatcher(w.id, true));
+    }
+
+    // ── engine scout: which engine's work you keep ──
+    if (method === "GET" && path === "/api/engines/report") {
+      const outcomeOf = (t: TurnLog): Outcome => {
+        if (t.out) return "out";
+        if (!t.ok) return "failed";
+        const rewound = store
+          .messagesFor(t.laneId)
+          .some((m) => m.rewound && m.at >= t.startedAt && m.at <= t.at + 5_000);
+        if (rewound) return "rewound";
+        const record = t.checkpointId ? checkpoints.get(t.checkpointId) : undefined;
+        if (record?.revertedAt) return "undone";
+        if (record?.rehearsal && record.discardedAt && !record.appliedAt) return "discarded";
+        return "kept";
+      };
+      const labelOf = (instanceId: string, model: string) => {
+        const instance = registry.get(instanceId);
+        const label = instance?.models.options.find((o) => o.id === model)?.label ?? model;
+        return instance && !label.toLowerCase().includes(String(instance.displayName ?? "").toLowerCase())
+          ? `${instance.displayName ?? instanceId} ${label}`.trim()
+          : label;
+      };
+      const report = engineReport(turnLog.all(), outcomeOf, labelOf, (botId) => store.bot(botId)?.modelSelection ?? null);
+      return json(res, 200, report);
     }
 
     // ── the morning brief ──

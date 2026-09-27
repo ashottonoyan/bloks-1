@@ -220,3 +220,14 @@ test("an archived room stays out of the list after the server echoes it and afte
   state = reducer(state, { type: "hydrateBloks", bloks: [{ ...room, archived: true }, other] });
   assert.deepEqual(state.bloks.map((b) => b.id), ["r2"], "a reload brought it back");
 });
+
+test("a renamed lane shows its new name at once, and only that lane changes", () => {
+  const lanes = [
+    { id: "l1", title: "see general", state: "idle" as const, createdAt: 1 },
+    { id: "l2", title: "General", state: "idle" as const, createdAt: 2 },
+  ];
+  let state = withState({ bots: [bot("a", { tasks: lanes }), bot("b", { tasks: lanes })] });
+  state = reducer(state, { type: "renameTask", botId: "a", taskId: "l1", title: "Q3 numbers" });
+  assert.deepEqual(state.bots[0].tasks!.map((t) => t.title), ["Q3 numbers", "General"]);
+  assert.deepEqual(state.bots[1].tasks!.map((t) => t.title), ["see general", "General"], "another agent's lane of the same id");
+});

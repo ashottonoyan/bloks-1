@@ -15,6 +15,10 @@
 //
 // Capped at three running tasks per agent: enough to feel parallel,
 // few enough that each still gets real attention (and real compute).
+//
+// A lane names itself from the first words of its first message, which
+// often say nothing about what it became. A double click renames it.
+import { useRef, useState } from "react";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { cn } from "@/lib/cn";
@@ -40,6 +44,48 @@ export function formatTokens(n: number): string | null {
 }
 
 const MAX_TASKS = 3;
+
+/** The server keeps a lane title to one line of 40 characters. */
+const MAX_TITLE = 40;
+
+/**
+ * The chip while it is being renamed. Its own element rather than an
+ * input inside the chip's button, which is not valid HTML and loses
+ * clicks in some browsers. Enter or clicking away keeps the new name;
+ * Escape, or leaving it blank or unchanged, keeps the old one.
+ */
+function RenameChip({ title, onDone }: { title: string; onDone: (next: string | null) => void }) {
+  const [value, setValue] = useState(title);
+  // Escape ends it, and so does the blur that follows as the field goes
+  // away; only the first one counts, or Escape would save what it undid
+  const ended = useRef(false);
+  const end = (next: string | null) => {
+    if (ended.current) return;
+    ended.current = true;
+    onDone(next);
+  };
+  const finish = () => {
+    const next = value.replace(/\s+/g, " ").trim();
+    end(next && next !== title ? next : null);
+  };
+  return (
+    <input
+      autoFocus
+      value={value}
+      maxLength={MAX_TITLE}
+      aria-label="Rename this conversation"
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={finish}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") end(null);
+      }}
+      size={Math.max(8, Math.min(MAX_TITLE, value.length + 1))}
+      className="shrink-0 rounded-full border border-foreground/40 bg-background px-2.5 py-1 text-[12px] font-medium text-foreground outline-none ring-2 ring-foreground/10"
+    />
+  );
+}
 
 /**
  * How full a lane is, as a ring rather than a number.
@@ -113,13 +159,16 @@ export function TaskStrip({
   onSelect,
   onNew,
   onClose,
+  onRename,
 }: {
   tasks: TaskChipData[];
   activeId: string;
   onSelect: (id: string) => void;
   onNew: () => void;
   onClose: (id: string) => void;
+  onRename?: (id: string, title: string) => void;
 }) {
+  const [renaming, setRenaming] = useState<string | null>(null);
   const running = tasks.filter((t) => t.state === "working").length;
   const needsYou = tasks.filter((t) => t.state === "needs-you").length;
 
@@ -128,10 +177,24 @@ export function TaskStrip({
       {tasks.map((task) => {
         const active = task.id === activeId;
         const canClose = tasks.length > 1;
+        if (renaming === task.id) {
+          return (
+            <RenameChip
+              key={task.id}
+              title={task.title}
+              onDone={(next) => {
+                setRenaming(null);
+                if (next) onRename?.(task.id, next);
+              }}
+            />
+          );
+        }
         return (
           <button
             key={task.id}
             onClick={() => onSelect(task.id)}
+            onDoubleClick={onRename ? () => setRenaming(task.id) : undefined}
+            title={onRename ? "Double-click to rename" : undefined}
             className={cn(
               "group/chip flex max-w-[220px] shrink-0 items-center gap-2 rounded-full border py-1 text-[12px] transition-all duration-150",
               canClose ? "pl-2.5 pr-1.5" : "px-2.5",

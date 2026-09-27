@@ -430,6 +430,7 @@ export type Action =
   | { type: "newTask"; botId: string }
   | { type: "selectTask"; botId: string; taskId: string }
   | { type: "closeTask"; botId: string; taskId: string }
+  | { type: "renameTask"; botId: string; taskId: string; title: string }
   | { type: "botAdded"; bot: Bot }
   | { type: "deleteBot"; botId: string; forget?: boolean }
   | { type: "restoreBot"; botId: string }
@@ -657,6 +658,17 @@ export function reducer(state: AppState, action: Action): AppState {
     case "selectTask":
     case "closeTask":
       return state;
+    case "renameTask":
+      // shown at once; the server's answer (one line, 40 characters)
+      // replaces it a moment later through botPatched
+      return {
+        ...state,
+        bots: state.bots.map((b) =>
+          b.id === action.botId
+            ? { ...b, tasks: b.tasks?.map((t) => (t.id === action.taskId ? { ...t, title: action.title } : t)) }
+            : b,
+        ),
+      };
     case "deleteBot": {
       // Archiving keeps the record, so it must keep the transcript in the
       // client too. Dropping the row and waiting for the bot frame to put

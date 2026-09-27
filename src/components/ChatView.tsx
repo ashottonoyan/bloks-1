@@ -796,6 +796,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         onSelect={(taskId) => taskId !== bot.activeTaskId && dispatch({ type: "selectTask", botId: bot.id, taskId })}
         onNew={() => dispatch({ type: "newTask", botId: bot.id })}
         onClose={(taskId) => dispatch({ type: "closeTask", botId: bot.id, taskId })}
+        onRename={(taskId, title) => dispatch({ type: "renameTask", botId: bot.id, taskId, title })}
       />
       {finding && (
         <div className="flex shrink-0 items-center gap-2 border-b bg-background/95 px-4 py-2 md:px-6">

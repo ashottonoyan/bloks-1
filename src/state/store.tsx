@@ -258,6 +258,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .then((r) => r.bot && rawDispatch({ type: "botPatched", bot: r.bot }))
             .catch(showError);
           break;
+        case "renameTask":
+          api(`/api/bots/${action.botId}/tasks/${action.taskId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ title: action.title }),
+          })
+            .then((r) => r.bot && rawDispatch({ type: "botPatched", bot: r.bot }))
+            .catch(showError);
+          break;
         case "sendToRoom":
           api(`/api/bloks/${action.blokId}/messages`, {
             method: "POST",

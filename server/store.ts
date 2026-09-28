@@ -207,9 +207,12 @@ export interface TaskRecord {
   createdAt: number;
 }
 
-/** A bot runs at most this many lanes: enough to feel parallel, few
- * enough that each still gets real attention and real compute. */
-export const MAX_TASKS = 3;
+/** How many lanes an agent keeps open. Once three, which ran out as soon
+ * as each conversation was about one thing, and sooner still because
+ * routines and other background work open lanes of their own. This bound
+ * is only about keeping the list sane; each lane still runs one turn at a
+ * time. */
+export const MAX_TASKS = 20;
 
 export interface BotRecord {
   id: string;
@@ -602,13 +605,16 @@ export class Store {
     return true;
   }
 
-  /** Closing a lane deletes its transcript; the last lane never closes. */
-  deleteTask(botId: string, taskId: string): "ok" | "busy" | "last" | "missing" {
+  /** Closing a lane deletes its transcript. An agent always has a lane to
+   * talk in (threadId names it everywhere), so closing the last one opens
+   * a fresh General in its place: the conversation ends, the agent stays
+   * reachable, and nobody has to open a lane just to close another. */
+  deleteTask(botId: string, taskId: string): "ok" | "busy" | "missing" {
     const bot = this.bot(botId);
     const task = bot?.tasks.find((t) => t.id === taskId);
     if (!bot || !task) return "missing";
     if (task.busy) return "busy";
-    if (bot.tasks.length <= 1) return "last";
+    if (bot.tasks.length <= 1) this.createTask(botId, "General");
     bot.tasks = bot.tasks.filter((t) => t.id !== taskId);
     this.messages.delete(task.id);
     try {

@@ -284,6 +284,7 @@ function CreateForm({
     date?: string;
     durationMin: number;
     runsOn?: "cloud" | "local" | "off";
+    thread?: string;
   }) => void;
 }) {
   const [targetId, setTargetId] = useState(pinnedTargetId ?? targets[0]?.id ?? "");
@@ -295,6 +296,7 @@ function CreateForm({
   const [date, setDate] = useState(prefill?.date ?? localDateValue(new Date()));
   const [durationMin, setDurationMin] = useState(30);
   const [runsOn, setRunsOn] = useState<"" | "cloud" | "local" | "off">("");
+  const [thread, setThread] = useState("");
   const target = targets.find((t) => t.id === targetId);
 
   const toggle = (day: number) =>
@@ -469,6 +471,23 @@ function CreateForm({
             </select>
           </label>
         )}
+        {target?.kind === "agent" && (
+          <label className="block">
+            <div
+              className="mb-1.5 text-[12.5px] font-medium text-muted-foreground"
+              title="Routines share one conversation unless you name another. Two routines in different conversations run side by side, each with its own context."
+            >
+              Conversation
+            </div>
+            <input
+              value={thread}
+              maxLength={40}
+              onChange={(e) => setThread(e.target.value)}
+              placeholder="Routines"
+              className="w-[180px] rounded-lg border border-input bg-background px-2.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-ring/60"
+            />
+          </label>
+        )}
       </div>
 
       <div className="mt-5 flex gap-2">
@@ -486,6 +505,7 @@ function CreateForm({
               ...(repeat === "once" ? { repeat, date } : {}),
               durationMin,
               ...(runsOn ? { runsOn } : {}),
+              ...(target.kind === "agent" && thread.trim() ? { thread: thread.trim() } : {}),
             })
           }
         >

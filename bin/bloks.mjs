@@ -146,7 +146,7 @@ const COMMANDS = {
     run: () => request("GET", "/api/routines"),
   },
   routine: {
-    use: 'routine --prompt <text> --time HH:MM [--days "1,2,3"] [--name <name>]',
+    use: 'routine --prompt <text> --time HH:MM [--days "1,2,3"] [--name <name>] [--thread <conversation>]',
     about: "file a routine for yourself",
     run: async (args) => {
       const flags = parseFlags(args);
@@ -159,6 +159,8 @@ const COMMANDS = {
         name: flags.name,
         prompt: flags.prompt,
         time: flags.time,
+        // its own conversation, so it does not share context with the rest
+        ...(flags.thread ? { thread: flags.thread } : {}),
         days: (flags.days ?? "").split(",").map((d) => Number(d.trim())).filter((d) => Number.isInteger(d)),
       });
     },

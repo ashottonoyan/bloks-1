@@ -48,6 +48,11 @@ export interface Routine {
    * "cloud" its cloud computer, "local" this Mac, "off" no computer.
    * Absent means wherever the agent normally runs. */
   runsOn?: "cloud" | "local" | "off";
+  /** The conversation it runs in, by title. Absent means the agent's
+   * shared "Routines" lane. Two routines that name different lanes run
+   * side by side, each with its own context; naming a lane the person
+   * already has puts the routine's turns in that conversation. */
+  thread?: string;
   enabled: boolean;
   createdAt: number;
   /** When it last actually fired. Absent until the first run. */
@@ -207,6 +212,9 @@ export function normalize(raw: unknown): Omit<Routine, "id" | "createdAt"> | nul
       : undefined;
   const runsOn =
     o.runsOn === "cloud" || o.runsOn === "local" || o.runsOn === "off" ? o.runsOn : undefined;
+  // a lane title: one line, as short as any other lane's
+  const thread =
+    typeof o.thread === "string" ? o.thread.replace(/\s+/g, " ").trim().slice(0, 40) || undefined : undefined;
 
   // every optional field is named, present-or-cleared, so a PATCH can
   // genuinely turn a once routine weekly or drop a name
@@ -222,6 +230,7 @@ export function normalize(raw: unknown): Omit<Routine, "id" | "createdAt"> | nul
     date: repeat === "once" ? date : undefined,
     durationMin,
     runsOn,
+    thread: targetKind === "agent" ? thread : undefined,
   };
 }
 
@@ -294,6 +303,7 @@ export class RoutineStore {
     if ("name" in patch) routine.name = patch.name || undefined;
     if ("durationMin" in patch) routine.durationMin = patch.durationMin;
     if ("runsOn" in patch) routine.runsOn = patch.runsOn;
+    if ("thread" in patch) routine.thread = patch.thread;
     if ("repeat" in patch) routine.repeat = patch.repeat;
     if ("date" in patch) routine.date = patch.date;
     this.save();

@@ -13,8 +13,9 @@
 // lane and keep talking. Switching lanes is one click; nothing queues
 // behind anything else.
 //
-// Capped at three running tasks per agent: enough to feel parallel,
-// few enough that each still gets real attention (and real compute).
+// Up to twenty lanes per agent, each running one turn at a time. Any of
+// them can be closed, the last one too: closing it opens a fresh General,
+// because an agent always has somewhere to be talked to.
 //
 // A lane names itself from the first words of its first message, which
 // often say nothing about what it became. A double click renames it.
@@ -43,7 +44,8 @@ export function formatTokens(n: number): string | null {
   return `${(Math.round(n / 100_000) / 10).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
-const MAX_TASKS = 3;
+/** The server's bound (MAX_TASKS in server/store.ts). */
+const MAX_TASKS = 20;
 
 /** The server keeps a lane title to one line of 40 characters. */
 const MAX_TITLE = 40;
@@ -176,7 +178,7 @@ export function TaskStrip({
     <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b bg-background/95 px-3 py-2.5 md:px-4">
       {tasks.map((task) => {
         const active = task.id === activeId;
-        const canClose = tasks.length > 1;
+        const only = tasks.length === 1;
         if (renaming === task.id) {
           return (
             <RenameChip
@@ -197,7 +199,7 @@ export function TaskStrip({
             title={onRename ? "Double-click to rename" : undefined}
             className={cn(
               "group/chip flex max-w-[220px] shrink-0 items-center gap-2 rounded-full border py-1 text-[12px] transition-all duration-150",
-              canClose ? "pl-2.5 pr-1.5" : "px-2.5",
+              "pl-2.5 pr-1.5",
               active
                 ? "border-foreground/25 bg-foreground text-background shadow-sm"
                 : "text-muted-foreground hover:border-foreground/25 hover:text-foreground",
@@ -229,23 +231,22 @@ export function TaskStrip({
                 </span>
               ) : null;
             })()}
-            {canClose && (
-              <span
-                role="button"
-                tabIndex={-1}
-                aria-label={`Close ${task.title}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClose(task.id);
-                }}
-                className={cn(
-                  "flex size-4 items-center justify-center rounded-full opacity-0 transition-opacity duration-150 group-hover/chip:opacity-100",
-                  active ? "hover:bg-background/20" : "hover:bg-accent",
-                )}
-              >
-                <X size={11} />
-              </span>
-            )}
+            <span
+              role="button"
+              tabIndex={-1}
+              aria-label={only ? `Close ${task.title} and start fresh` : `Close ${task.title}`}
+              title={only ? "Close and start a fresh conversation" : "Close this conversation"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(task.id);
+              }}
+              className={cn(
+                "flex size-4 items-center justify-center rounded-full opacity-0 transition-opacity duration-150 group-hover/chip:opacity-100",
+                active ? "hover:bg-background/20" : "hover:bg-accent",
+              )}
+            >
+              <X size={11} />
+            </span>
           </button>
         );
       })}

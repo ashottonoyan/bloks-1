@@ -4327,7 +4327,7 @@ async function runDueRoutines() {
       // to do it, and restoring or handing back would bring back a
       // schedule that had already spent itself.
       if (bot.archivedAt || wheel.heldBy(bot.id)) continue;
-      const laneId = backgroundTaskId(bot.id, "Routines");
+      const laneId = backgroundTaskId(bot.id, routine.thread ?? "Routines");
       if (!laneId) continue;
       routines.markRan(routine.id, now.getTime());
       const run = routines.beginRun(routine.id, laneId);
@@ -7304,7 +7304,6 @@ const server = createServer(async (req, res) => {
       const outcome = store.deleteTask(m[1], m[2]);
       if (outcome === "missing") return json(res, 404, { error: "no such task" });
       if (outcome === "busy") return json(res, 409, { error: "that task is running, interrupt it first" });
-      if (outcome === "last") return json(res, 409, { error: "an agent keeps at least one task" });
       const fresh = store.bot(m[1])!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
       return json(
@@ -9711,6 +9710,7 @@ const server = createServer(async (req, res) => {
         date: body.date ?? existing.date,
         durationMin: body.durationMin ?? existing.durationMin,
         runsOn: body.runsOn === null ? undefined : (body.runsOn ?? existing.runsOn),
+        thread: body.thread === null ? undefined : (body.thread ?? existing.thread),
       });
       if (!merged) return json(res, 400, { error: "that is not a valid routine" });
       const routine = routines.patch(m[1], merged);
@@ -9746,8 +9746,9 @@ const server = createServer(async (req, res) => {
             }),
           );
       } else {
-        const laneId = backgroundTaskId(routine.targetId, "Routines");
-        if (!laneId) return json(res, 409, { error: "that agent's Routines lane is busy. Try again when it settles" });
+        const lane = routine.thread ?? "Routines";
+        const laneId = backgroundTaskId(routine.targetId, lane);
+        if (!laneId) return json(res, 409, { error: `that agent's ${lane} lane is busy. Try again when it settles` });
         const run = routines.beginRun(routine.id, laneId);
         if (run) openRuns.set(laneId, { routineId: routine.id, runId: run.id });
         broadcast({ kind: "routines" });

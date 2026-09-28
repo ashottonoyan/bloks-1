@@ -806,7 +806,15 @@ export function ChatView({ bot }: { bot: Bot }) {
         activeId={bot.activeTaskId ?? bot.threadId}
         onSelect={(taskId) => taskId !== bot.activeTaskId && dispatch({ type: "selectTask", botId: bot.id, taskId })}
         onNew={() => dispatch({ type: "newTask", botId: bot.id })}
-        onClose={(taskId) => dispatch({ type: "closeTask", botId: bot.id, taskId })}
+        onClose={(taskId) => {
+          // Closing deletes the transcript. The last lane only just became
+          // closable, so it asks; the others close as they always have.
+          const last = (bot.tasks ?? []).length <= 1;
+          if (last && !window.confirm("Close this conversation? Its messages are deleted, and a fresh one opens in its place.")) {
+            return;
+          }
+          dispatch({ type: "closeTask", botId: bot.id, taskId });
+        }}
         onRename={(taskId, title) => dispatch({ type: "renameTask", botId: bot.id, taskId, title })}
       />
       {finding && (

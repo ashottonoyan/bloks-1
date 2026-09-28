@@ -765,6 +765,39 @@ describe("routine shapes", () => {
     await h.fetch(`/api/bloks/${blok.id}`, { method: "DELETE" });
   });
 
+  test("a routine can run in a conversation of its own, and defaults to Routines", async () => {
+    const { bot } = await h.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Two Jobs" }) });
+    const routine = async (name: string, thread?: string) =>
+      (
+        await h.json("/api/routines", {
+          method: "POST",
+          body: JSON.stringify({ targetId: bot.id, targetKind: "agent", name, prompt: name, time: "08:00", ...(thread ? { thread } : {}) }),
+        })
+      ).routine;
+    const news = await routine("News digest", "  Morning\n news  ");
+    const inbox = await routine("Inbox sweep");
+    assert.equal(news.thread, "Morning news", "one short line, like any lane title");
+    assert.equal(inbox.thread, undefined);
+
+    // no engine here, so each turn fails at once; the lane it opened stays
+    await h.fetch(`/api/routines/${news.id}/run`, { method: "POST" });
+    await h.fetch(`/api/routines/${inbox.id}/run`, { method: "POST" });
+    const titles = (await h.json("/api/bots")).bots.find((b: any) => b.id === bot.id).tasks.map((t: any) => t.title);
+    assert.ok(titles.includes("Morning news"), titles.join(", "));
+    assert.ok(titles.includes("Routines"), titles.join(", "));
+
+    // and it can be moved back to the shared lane
+    const { routine: moved } = await h.json(`/api/routines/${news.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ thread: null }),
+    });
+    assert.equal(moved.thread, undefined);
+
+    await h.fetch(`/api/routines/${news.id}`, { method: "DELETE" });
+    await h.fetch(`/api/routines/${inbox.id}`, { method: "DELETE" });
+    await h.fetch(`/api/bots/${bot.id}?forget=1`, { method: "DELETE" });
+  });
+
   test("a routine carries a name, a duration, and a place to run", async () => {
     const { bots } = await h.json("/api/bots");
     const made = await h.json("/api/routines", {
@@ -2136,12 +2169,25 @@ describe("task lanes", () => {
     assert.ok(switched.messages.length > 0, "General still has the greeting");
   });
 
-  test("the lane cap is three, and the refusal is readable", async () => {
-    await h.json(`/api/bots/${botId}/tasks`, { method: "POST", body: "{}" });
+  test("the lane cap is twenty, and the refusal is readable", async () => {
+    // three used to run out as soon as each conversation was about one
+    // thing, with routines and background work taking lanes of their own
+    const opened: string[] = [];
+    const { bots } = await h.json("/api/bots");
+    const before = bots.find((b: any) => b.id === botId).tasks.length;
+    for (let open = before; open < 20; open++) {
+      const { bot } = await h.json(`/api/bots/${botId}/tasks`, { method: "POST", body: "{}" });
+      opened.push(bot.activeTaskId);
+      assert.equal(bot.tasks.length, open + 1);
+    }
     const res = await h.fetch(`/api/bots/${botId}/tasks`, { method: "POST", body: "{}" });
     assert.equal(res.status, 409);
     const body = await res.json();
-    assert.ok(/at most 3/.test(body.error), body.error);
+    assert.ok(/at most 20/.test(body.error), body.error);
+    // back to the three lanes the tests below expect
+    for (const id of opened.slice(Math.max(0, 3 - before))) {
+      assert.equal((await h.fetch(`/api/bots/${botId}/tasks/${id}`, { method: "DELETE" })).status, 200);
+    }
   });
 
   test("a lane can be renamed, to one short line", async () => {
@@ -2170,7 +2216,7 @@ describe("task lanes", () => {
     assert.equal(missing.status, 404);
   });
 
-  test("closing a lane removes it; the last lane refuses to close", async () => {
+  test("closing a lane removes it; closing the last opens a fresh General", async () => {
     const { bots } = await h.json("/api/bots");
     let bot = bots.find((b: any) => b.id === botId);
     for (const lane of bot.tasks.slice(1)) {
@@ -2181,10 +2227,17 @@ describe("task lanes", () => {
     const { bots: after } = await h.json("/api/bots");
     const remaining = after.find((b: any) => b.id === botId);
     assert.equal(remaining.tasks.length, 1);
-    const last = await h.fetch(`/api/bots/${botId}/tasks/${remaining.tasks[0].id}?forget=1`, {
-      method: "DELETE",
-    });
-    assert.equal(last.status, 409);
+    const old = remaining.tasks[0];
+    const last = await h.fetch(`/api/bots/${botId}/tasks/${old.id}?forget=1`, { method: "DELETE" });
+    assert.equal(last.status, 200);
+    // the conversation is gone, and the agent is still there to talk to
+    const { bot: fresh } = await last.json();
+    assert.equal(fresh.tasks.length, 1);
+    assert.notEqual(fresh.tasks[0].id, old.id, "a new lane, not the old one renamed");
+    assert.equal(fresh.tasks[0].title, "General");
+    assert.equal(fresh.activeTaskId, fresh.tasks[0].id);
+    assert.equal(fresh.threadId, fresh.tasks[0].id);
+    assert.deepEqual(fresh.messages, [], "the new lane starts empty");
   });
 
   test("a turn in one lane leaves the other lanes free", async () => {

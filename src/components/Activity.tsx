@@ -26,6 +26,7 @@ import { AgentAvatar } from "./Avatar";
 import { TeamMapView } from "./TeamMap";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
+import { useEscape } from "@/lib/useEscape";
 
 export interface Spend {
   turns: number;
@@ -146,6 +147,7 @@ export function ActivityPanel() {
   }, [visible]);
 
   const close = () => dispatch({ type: "toggleActivity", open: false });
+  useEscape(close);
   const botOf = (id: string) => state.bots.find((b) => b.id === id);
 
   const goTo = (row: { botId: string; threadId: string }) => {

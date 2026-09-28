@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/cn";
+import { useEscape } from "@/lib/useEscape";
 
 interface DiffLine {
   kind: "same" | "add" | "del" | "gap";
@@ -71,12 +72,7 @@ export function MemoryPanel() {
   const bot = agents.find((b) => b.id === botId) ?? null;
   const close = () => dispatch({ type: "toggleMemory", open: false, botId: null });
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEscape(close);
 
   return (
     <div
@@ -320,7 +316,10 @@ function Files({ bot }: { bot: Bot }) {
               onChange={(e) => setNaming(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") createTopic();
-                if (e.key === "Escape") setNaming(null);
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setNaming(null);
+                }
               }}
               placeholder="people, projects..."
               className="h-7 text-[12px]"

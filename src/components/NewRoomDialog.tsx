@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { BrowseFolderButton } from "@/components/ui/browse-folder";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
+import { useEscape } from "@/lib/useEscape";
 
 const MAX_MEMBERS = 8;
 
@@ -52,6 +53,7 @@ export function NewRoomDialog() {
 
   const agents = state.bots.filter((b) => !b.hidden);
   const close = () => dispatch({ type: "toggleNewRoom", open: false });
+  useEscape(close);
 
   // rooms someone banked earlier, shown above the premade shelf
   useEffect(() => {

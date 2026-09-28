@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { BrowseFolderButton } from "@/components/ui/browse-folder";
 import { cn } from "@/lib/cn";
+import { useEscape } from "@/lib/useEscape";
 
 interface FolderStanding {
   path: string;
@@ -71,6 +72,7 @@ export function ProjectsPanel() {
   }, [load]);
 
   const close = () => dispatch({ type: "toggleProjects", open: false });
+  useEscape(close);
 
   const open = (project: ProjectRow) => {
     void api(`/api/projects/${project.id}/open`, { method: "POST" }).catch(() => {});

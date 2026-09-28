@@ -16,6 +16,7 @@ import { api, useStore } from "@/state/store";
 import { McpAppsCard } from "./McpApps";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { useEscape } from "@/lib/useEscape";
 
 interface ToolkitCard {
   slug: string;
@@ -50,6 +51,7 @@ function ServiceIcon({ card }: { card: ToolkitCard }) {
 
 export function PluginsPanel() {
   const { dispatch } = useStore();
+  useEscape(() => dispatch({ type: "togglePlugins", open: false }));
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
   const [configured, setConfigured] = useState(true);

@@ -15,6 +15,7 @@ import { AgentAvatar } from "./Avatar";
 import { ChangesCard } from "./ChangesCard";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { useEscape } from "@/lib/useEscape";
 
 interface Attempt {
   id: string;
@@ -51,12 +52,7 @@ export function RehearsalsPanel() {
   }, []);
   // the server says when anything moves; this re-reads then
   useEffect(load, [load, state.rehearsalsTick]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEscape(close);
 
   // attempts at one task together, newest task first
   const groups = useMemo(() => {

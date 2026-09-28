@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/cn";
 import { thisComputer } from "@/lib/thisComputer";
+import { useEscape } from "@/lib/useEscape";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
@@ -236,6 +237,7 @@ function LocalVmCard({ bot }: { bot: Bot }) {
 
 export function ComputerPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
+  useEscape(() => dispatch({ type: "toggleComputer", open: false }));
   const [phase, setPhase] = useState<Phase>("checking");
   const [boxState, setBoxState] = useState<string | null>(null);
   const [polledFrame, setPolledFrame] = useState<{ png: string; mime: string } | null>(null);

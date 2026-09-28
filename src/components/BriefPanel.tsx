@@ -17,6 +17,7 @@ import { AgentAvatar } from "./Avatar";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/cn";
+import { useEscape } from "@/lib/useEscape";
 
 interface BriefPart {
   botId: string | null;
@@ -97,12 +98,7 @@ export function BriefPanel() {
     setPlaying(null);
   };
   useEffect(() => stop, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEscape(close);
 
   // Each part is fetched as a file and played from memory, the way the
   // rest of the app plays speech; the next one is fetched while this one

@@ -202,7 +202,7 @@ export function SidebarFooter({ rail, counts }: { rail: boolean; counts: FooterC
   const side = rail ? "right" : "top";
   const align = rail ? "end" : "start";
   const tab = cn(
-    "relative flex items-center justify-center rounded-lg text-muted-foreground outline-none transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] data-[state=open]:bg-accent data-[state=open]:text-foreground",
+    "relative flex items-center justify-center rounded-lg text-muted-foreground outline-none transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.96] data-[state=open]:bg-accent data-[state=open]:text-foreground",
     rail ? "size-10" : "min-w-0 flex-1 flex-col gap-0.5 py-1.5 text-[11px] font-medium",
   );
   const dot = (tone: "brand" | "warning") => (

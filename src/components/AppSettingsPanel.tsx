@@ -51,6 +51,7 @@ import SlidersHorizontal from "lucide-react/dist/esm/icons/sliders-horizontal.mj
 import Smartphone from "lucide-react/dist/esm/icons/smartphone.mjs";
 import UserIcon from "lucide-react/dist/esm/icons/user.mjs";
 import UserPlus from "lucide-react/dist/esm/icons/user-plus.mjs";
+import { useEscape } from "@/lib/useEscape";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: React.ReactNode }> = [
   { value: "light", label: "Light", icon: <Sun size={14} /> },
@@ -730,17 +731,8 @@ export function AppSettingsPanel() {
     scroller.current?.scrollTo({ top: 0 });
   }, [pageId]);
 
-  // Escape leaves, unless it is clearing a search or closing something on top
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("[role=dialog], [role=menu]")) return;
-      close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+  // Escape leaves, unless something opened on top of the page takes it first
+  useEscape(close);
 
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const matches = (p: SettingsPage) =>

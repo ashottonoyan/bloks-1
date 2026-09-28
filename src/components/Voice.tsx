@@ -673,7 +673,7 @@ export function GroupCallOverlay({
               <div
                 key={member.id}
                 className={cn(
-                  "flex flex-col items-center gap-1.5 transition-all duration-300",
+                  "flex flex-col items-center gap-1.5 transition-[scale,opacity] duration-300 ease-out",
                   focused ? "scale-110" : "opacity-70",
                 )}
               >

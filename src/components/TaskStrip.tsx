@@ -198,7 +198,7 @@ export function TaskStrip({
             onDoubleClick={onRename ? () => setRenaming(task.id) : undefined}
             title={onRename ? "Double-click to rename" : undefined}
             className={cn(
-              "group/chip flex max-w-[220px] shrink-0 items-center gap-2 rounded-full border py-1 text-[12px] transition-all duration-150",
+              "group/chip flex max-w-[220px] shrink-0 items-center gap-2 rounded-full border py-1 text-[12px] transition-[background-color,border-color,color,box-shadow,scale] duration-150 ease-out active:scale-[0.97]",
               "pl-2.5 pr-1.5",
               active
                 ? "border-foreground/25 bg-foreground text-background shadow-sm"

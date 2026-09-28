@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { SkillCatalog } from "./SkillCatalog";
 import { cn } from "@/lib/cn";
 import { DiffLines, type DiffLine } from "./DiffLines";
+import { useEscape } from "@/lib/useEscape";
 
 const MAX_SKILL_BYTES = 16_000;
 
@@ -275,6 +276,7 @@ export function SkillsPanel() {
   }, [load]);
 
   const close = () => dispatch({ type: "toggleSkills", open: false });
+  useEscape(close);
 
   const visible = (skills ?? []).filter(
     (s) =>

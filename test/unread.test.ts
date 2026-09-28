@@ -42,4 +42,9 @@ describe("per-lane unread", () => {
     assert.equal(readOpenLane({ ...bot, tasks: [lane("a", true, 5)] }).unread, false);
     assert.equal(openLaneUnread(bot), true);
   });
+  test("an agent flagged unread by a room turn, with no lane to show it, can still be read", () => {
+    const bot = { threadId: "a", activeTaskId: "a", unread: true, tasks: [lane("a", false, 5)] };
+    assert.equal(openLaneUnread(bot), true);
+    assert.equal(readOpenLane(bot).unread, false);
+  });
 });

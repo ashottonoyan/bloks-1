@@ -272,10 +272,13 @@ export function readOpenLane<T extends LanedBot>(bot: T): T {
   return { ...bot, tasks, unread: tasks.some((t) => t.unread) };
 }
 
-/** Whether the lane on screen is the unread one. */
+/** Whether the lane on screen is the unread one. An agent flagged unread
+ * with no lane to show for it (a turn in a room marks the agent, not a
+ * lane) counts as the open one, or that flag could never be cleared. */
 export function openLaneUnread(bot: LanedBot): boolean {
   const open = bot.activeTaskId ?? bot.threadId;
   const lane = bot.tasks?.find((t) => t.id === open);
+  if (bot.unread && !bot.tasks?.some((t) => t.unread)) return true;
   return lane ? Boolean(lane.unread) : Boolean(bot.unread);
 }
 

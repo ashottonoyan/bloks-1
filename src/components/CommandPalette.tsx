@@ -13,6 +13,7 @@ import Search from "lucide-react/dist/esm/icons/search.mjs";
 import Users from "lucide-react/dist/esm/icons/users.mjs";
 import { api, useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "./Avatar";
+import { SETTINGS_PAGES } from "./AppSettingsPanel";
 import { cn } from "@/lib/cn";
 
 interface MessageHit {
@@ -94,7 +95,16 @@ export function CommandPalette() {
     () => rankByName(state.bloks, (r) => r.name, query.trim()),
     [state.bloks, query],
   );
-  const total = bots.length + rooms.length + hits.length;
+  // Settings pages by what they hold, so "voice" or "telegram" goes
+  // straight to the page rather than through the Settings menu.
+  const pages = useMemo(() => {
+    const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    return SETTINGS_PAGES.flatMap((g) => g.pages).filter((p) =>
+      words.every((w) => `${p.label} ${p.keywords}`.toLowerCase().includes(w)),
+    );
+  }, [query]);
+  const total = bots.length + rooms.length + pages.length + hits.length;
 
   useEffect(() => {
     setCursor((c) => Math.min(c, Math.max(0, total - 1)));
@@ -107,18 +117,18 @@ export function CommandPalette() {
       dispatch({ type: "select", id: bots[index].id });
     } else if (index < bots.length + rooms.length) {
       dispatch({ type: "select", id: rooms[index - bots.length].id });
+    } else if (index < bots.length + rooms.length + pages.length) {
+      dispatch({ type: "toggleAppSettings", open: true, page: pages[index - bots.length - rooms.length].id });
     } else {
-      const hit = hits[index - bots.length - rooms.length];
+      const hit = hits[index - bots.length - rooms.length - pages.length];
       if (!hit) return;
       if (hit.blokId) {
         dispatch({ type: "select", id: hit.blokId });
       } else if (hit.botId) {
-        dispatch({ type: "select", id: hit.botId });
         const bot = state.bots.find((b) => b.id === hit.botId);
         // the hit may live in another lane; open that lane
-        if (bot && bot.activeTaskId !== hit.threadId && bot.tasks?.some((t) => t.id === hit.threadId)) {
-          dispatch({ type: "selectTask", botId: hit.botId, taskId: hit.threadId });
-        }
+        const lane = bot?.tasks?.some((t) => t.id === hit.threadId) ? hit.threadId : undefined;
+        dispatch({ type: "select", id: hit.botId, lane });
       }
     }
     setOpen(false);
@@ -178,7 +188,7 @@ export function CommandPalette() {
                 setOpen(false);
               }
             }}
-            placeholder="Jump to an agent, room, or anything anyone said…"
+            placeholder="Jump to an agent, a room, a setting, or anything anyone said…"
             className="h-12 w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
           />
           <kbd className="shrink-0 rounded-md border px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
@@ -228,6 +238,26 @@ export function CommandPalette() {
               )}
             </Section>
           )}
+          {pages.length > 0 && (
+            <Section label="Settings">
+              {pages.map((page, i) => {
+                const Icon = page.icon;
+                return row(
+                  ++index,
+                  <>
+                    <span className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                      <Icon size={13} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13.5px] font-medium text-foreground">{page.label}</span>
+                      <span className="block truncate text-[11.5px] text-muted-foreground">{page.description}</span>
+                    </span>
+                  </>,
+                  () => activate(bots.length + rooms.length + i),
+                );
+              })}
+            </Section>
+          )}
           {hits.length > 0 && (
             <Section label="Messages">
               {hits.map((hit, i) =>
@@ -247,7 +277,7 @@ export function CommandPalette() {
                       </span>
                     </span>
                   </>,
-                  () => activate(bots.length + rooms.length + i),
+                  () => activate(bots.length + rooms.length + pages.length + i),
                 ),
               )}
             </Section>

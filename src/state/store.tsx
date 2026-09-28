@@ -26,6 +26,8 @@ import {
   findCard,
   initialState,
   reducer,
+  settleUnanswered,
+  withoutEdits,
   type Action,
   type AppState,
   type Bot,
@@ -58,6 +60,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Text fields save as you type, so edits are coalesced per agent
   // rather than sending a request per keystroke.
   const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: Record<string, unknown> }>());
+  /** Latest unanswered save generation per agent and field. Together with
+   * the waiting patches, these are the fields a broadcast must not
+   * overwrite, because the person has typed past what the server has. */
+  const unanswered = useRef(new Map<string, Map<string, number>>());
+  /** Monotonic per-agent, per-field save counter. Kept separate from
+   * unanswered so a settled mark does not let an older save reuse a
+   * generation and clear a newer one. */
+  const saveSeq = useRef(new Map<string, Map<string, number>>());
+  const editing = (botId: string) =>
+    new Set([
+      ...Object.keys(patchTimers.current.get(botId)?.patch ?? {}),
+      ...(unanswered.current.get(botId)?.keys() ?? []),
+    ]);
 
   const dispatch = useMemo(() => {
     const showError = (e: unknown) => {
@@ -303,7 +318,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             patch,
             timer: setTimeout(() => {
               timers.delete(action.botId);
-              api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify(patch) }).catch(showError);
+              const sent = unanswered.current.get(action.botId) ?? new Map<string, number>();
+              unanswered.current.set(action.botId, sent);
+              const seq = saveSeq.current.get(action.botId) ?? new Map<string, number>();
+              saveSeq.current.set(action.botId, seq);
+              // One generation per field per save from a counter that is
+              // never cleared, so an older response cannot reuse a settled
+              // generation and wipe a newer mark.
+              const saveGens = new Map<string, number>();
+              for (const key of Object.keys(patch)) {
+                const gen = (seq.get(key) ?? 0) + 1;
+                seq.set(key, gen);
+                sent.set(key, gen);
+                saveGens.set(key, gen);
+              }
+              api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify(patch) })
+                .then((r) => {
+                  // Drop this save's marks when it is still the latest for
+                  // that field, so server-normalized values (a trimmed
+                  // section name, for example) can land. Only fields this
+                  // save sent are merged: the PATCH body returns the whole
+                  // bot, and adopting other fields would let an older save
+                  // overwrite a newer edit on a different key.
+                  const stale = settleUnanswered(sent, saveGens);
+                  if (r?.bot) {
+                    const blocked = new Set([...editing(action.botId), ...stale]);
+                    const bot: Partial<Bot> & { id: string } = { id: r.bot.id };
+                    for (const key of Object.keys(patch)) {
+                      if (!blocked.has(key) && key in r.bot) {
+                        (bot as Record<string, unknown>)[key] = (r.bot as Record<string, unknown>)[key];
+                      }
+                    }
+                    rawDispatch({ type: "botPatched", bot });
+                  }
+                })
+                .catch((e) => {
+                  settleUnanswered(sent, saveGens);
+                  showError(e);
+                });
             }, 400),
           });
           break;
@@ -475,7 +527,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               body: JSON.stringify({ unread: false }),
             }).catch(() => {});
           }
-          rawDispatch({ type: "botPatched", bot });
+          rawDispatch({ type: "botPatched", bot: withoutEdits(bot, editing(bot.id)) });
           break;
         }
         case "runtime": {

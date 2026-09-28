@@ -500,6 +500,31 @@ function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppStat
   return { ...state, bots: state.bots.map((b) => (b.id === botId ? fn(b) : b)) };
 }
 
+/** An agent record from the server, minus the fields the person is still
+ * typing into. The echo of a save reports what was sent, which is older
+ * than what has been typed since, and adopting it would take those
+ * keystrokes back. */
+export function withoutEdits<T extends object>(bot: T, editing: ReadonlySet<string>): T {
+  if (!editing.size) return bot;
+  return Object.fromEntries(Object.entries(bot).filter(([key]) => !editing.has(key))) as T;
+}
+
+/** Drop this save's unanswered marks when it is still the latest for that
+ * field, and return the fields whose response is stale (a newer save is
+ * still in flight). The caller withholds those from the merge so an
+ * older HTTP response cannot overwrite newer text. */
+export function settleUnanswered(
+  unanswered: Map<string, number>,
+  saveGens: ReadonlyMap<string, number>,
+): Set<string> {
+  const stale = new Set<string>();
+  for (const [key, gen] of saveGens) {
+    if (unanswered.get(key) === gen) unanswered.delete(key);
+    else stale.add(key);
+  }
+  return stale;
+}
+
 /** The card a card action is about, in an agent's chat or in a room. */
 export function findCard(
   state: AppState,

@@ -310,7 +310,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background p-4">
       <BlockField />
-      <div className="relative flex w-full max-w-[440px] animate-pop-in flex-col rounded-2xl border bg-popover p-6 shadow-2xl shadow-[--shadow-color] sm:p-8">
+      <div className="relative flex w-full max-w-[440px] animate-pop-in flex-col rounded-2xl border bg-popover p-6 shadow-2xl shadow-(color:--shadow-color) sm:p-8">
         {/* A first boot seeds one agent that says hello, so "is anything
             here" would greet every new install with "welcome back". What
             marks a real workspace is that somebody has spoken in it, or

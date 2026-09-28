@@ -151,8 +151,7 @@ export function BriefPanel() {
   };
 
   const open = (botId: string, threadId: string) => {
-    dispatch({ type: "select", id: botId });
-    dispatch({ type: "selectTask", botId, taskId: threadId });
+    dispatch({ type: "select", id: botId, lane: threadId });
     close();
   };
 
@@ -172,7 +171,7 @@ export function BriefPanel() {
       onClick={close}
     >
       <div
-        className="flex h-[84%] w-[760px] max-w-[94vw] animate-pop-in flex-col overflow-hidden rounded-2xl border bg-popover shadow-2xl shadow-[--shadow-color]"
+        className="flex h-[84%] w-[760px] max-w-[94vw] animate-pop-in flex-col overflow-hidden rounded-2xl border bg-popover shadow-2xl shadow-(color:--shadow-color)"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Morning brief"

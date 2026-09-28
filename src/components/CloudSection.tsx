@@ -85,7 +85,7 @@ export function CloudSection() {
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <Cloud size={13.5} className="shrink-0 text-brand-ink" />
-            <span className="text-[13.5px] font-semibold text-foreground">Bloks Cloud</span>
+            <span className="text-[13.5px] font-semibold text-foreground">Your plan</span>
           </div>
           <div className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">
             Reaches {thisComputer()} from your phone anywhere, not just on this network, and pushes

@@ -109,7 +109,7 @@ export function ModelPicker({
       {open && (
         <div
           data-model-picker-content
-          className="absolute right-0 top-full z-30 mt-1.5 flex w-[300px] max-w-[92vw] origin-top-right animate-pop-in overflow-hidden rounded-xl border bg-popover shadow-lg shadow-[--shadow-color]"
+          className="absolute right-0 top-full z-30 mt-1.5 flex w-[300px] max-w-[92vw] origin-top-right animate-pop-in overflow-hidden rounded-xl border bg-popover shadow-lg shadow-(color:--shadow-color)"
         >
           {/* instance rail */}
           <div className="flex flex-col gap-0.5 border-r bg-muted/40 p-1.5">

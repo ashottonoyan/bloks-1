@@ -97,7 +97,7 @@ function RewindableFrame({ src, alt }: { src: string; alt: string }) {
               const v = Number(e.target.value);
               setCursor(v >= tape.current.length - 1 ? null : v);
             }}
-            className="h-1 min-w-0 flex-1 cursor-pointer accent-[--brand]"
+            className="h-1 min-w-0 flex-1 cursor-pointer accent-(--brand)"
             aria-label="Rewind through recent frames"
           />
           <button
@@ -223,7 +223,7 @@ function LocalVmCard({ bot }: { bot: Bot }) {
             variant="secondary"
             size="sm"
             className="mt-2.5"
-            onClick={() => dispatch({ type: "toggleAppSettings" })}
+            onClick={() => dispatch({ type: "toggleAppSettings", open: true, page: "apps" })}
           >
             Set it up in Settings
           </Button>

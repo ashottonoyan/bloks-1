@@ -84,7 +84,7 @@ export function ProjectsPanel() {
       onClick={close}
     >
       <div
-        className="flex h-[76%] w-[600px] max-w-[92vw] animate-pop-in flex-col rounded-2xl border bg-popover p-5 shadow-2xl shadow-[--shadow-color]"
+        className="flex h-[76%] w-[600px] max-w-[92vw] animate-pop-in flex-col rounded-2xl border bg-popover p-5 shadow-2xl shadow-(color:--shadow-color)"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">

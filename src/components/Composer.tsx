@@ -534,7 +534,7 @@ export function Composer({
           <div
             role="listbox"
             aria-label={`${bot.name}'s skills`}
-            className="overflow-hidden rounded-xl border bg-popover p-1 shadow-lg shadow-[--shadow-color]"
+            className="overflow-hidden rounded-xl border bg-popover p-1 shadow-lg shadow-(color:--shadow-color)"
           >
             {offered.length === 0 ? (
               <div className="px-2 py-1.5 text-[12.5px] text-muted-foreground">

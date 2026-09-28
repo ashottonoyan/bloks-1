@@ -134,7 +134,7 @@ export function PluginsPanel() {
     >
       <div
         className={cn(
-          "flex max-h-[80%] animate-pop-in flex-col rounded-2xl border bg-popover p-5 shadow-2xl shadow-[--shadow-color] transition-[width] duration-200",
+          "flex max-h-[80%] animate-pop-in flex-col rounded-2xl border bg-popover p-5 shadow-2xl shadow-(color:--shadow-color) transition-[width] duration-200",
           // an app needs room to be an app
           view === "apps" ? "w-[min(760px,92vw)]" : "w-[min(540px,92vw)]",
         )}
@@ -202,7 +202,7 @@ export function PluginsPanel() {
               className="underline"
               onClick={() => {
                 dispatch({ type: "togglePlugins", open: false });
-                dispatch({ type: "toggleAppSettings", open: true });
+                dispatch({ type: "toggleAppSettings", open: true, page: "apps" });
               }}
             >
               add one in Settings
@@ -217,7 +217,7 @@ export function PluginsPanel() {
               className="underline hover:text-foreground"
               onClick={() => {
                 dispatch({ type: "togglePlugins", open: false });
-                dispatch({ type: "toggleAppSettings", open: true });
+                dispatch({ type: "toggleAppSettings", open: true, page: "apps" });
               }}
             >
               Add a Composio API key

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import BellDot from "lucide-react/dist/esm/icons/bell-dot.mjs";
 import ClipboardCopy from "lucide-react/dist/esm/icons/clipboard-copy.mjs";
 import Copy from "lucide-react/dist/esm/icons/copy.mjs";
-import Moon from "lucide-react/dist/esm/icons/moon.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import PanelLeftClose from "lucide-react/dist/esm/icons/panel-left-close.mjs";
 import PanelLeftOpen from "lucide-react/dist/esm/icons/panel-left-open.mjs";
@@ -23,11 +22,9 @@ import Search from "lucide-react/dist/esm/icons/search.mjs";
 import SettingsIcon from "lucide-react/dist/esm/icons/settings-2.mjs";
 import Sparkles from "lucide-react/dist/esm/icons/sparkles.mjs";
 import Users from "lucide-react/dist/esm/icons/users.mjs";
-import Sun from "lucide-react/dist/esm/icons/sun.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { api, useStore, formatWhen, type Blok, type Bot } from "@/state/store";
 import { Button } from "@/components/ui/button";
-import { useTheme } from "@/lib/theme";
 import { AgentAvatar } from "./Avatar";
 import { BloksLogo, BloksMark } from "./Brand";
 import { cn } from "@/lib/cn";
@@ -36,7 +33,9 @@ import { previewLine } from "@/lib/preview";
 import { inSection, sectionNames, shownInSection } from "@/lib/sections";
 import { useProfileNotes } from "./AboutYou";
 import { useBriefs } from "./BriefPanel";
-import Sunrise from "lucide-react/dist/esm/icons/sunrise.mjs";
+import { ConversationRows, SidebarFooter, WaitingRow } from "./SidebarParts";
+import { useConversationsView } from "@/lib/conversationsView";
+import ListTree from "lucide-react/dist/esm/icons/list-tree.mjs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -213,7 +212,7 @@ function BotContextMenu({
     <div
       data-bot-menu
       style={{ top, left }}
-      className="fixed z-40 w-[208px] animate-pop-in rounded-xl border bg-popover p-1 shadow-lg shadow-[--shadow-color]"
+      className="fixed z-40 w-[208px] animate-pop-in rounded-xl border bg-popover p-1 shadow-lg shadow-(color:--shadow-color)"
     >
       {[
         item(
@@ -259,10 +258,14 @@ function BotListItem({
   bot,
   onMenu,
   rail,
+  compact,
 }: {
   bot: Bot;
   onMenu: (menu: MenuState) => void;
   rail?: boolean;
+  /** The conversations view: one line per agent, with its conversations
+   * listed underneath instead of one conversation's preview. */
+  compact?: boolean;
 }) {
   const { state, dispatch } = useStore();
   const selected = state.selectedId === bot.id;
@@ -288,6 +291,59 @@ function BotListItem({
           <span className="absolute bottom-1 right-1 size-2.5 rounded-full bg-brand ring-2 ring-sidebar" />
         )}
       </button>
+    );
+  }
+  if (compact) {
+    const lanes = bot.tasks ?? [];
+    const many = lanes.length > 1;
+    const newest = Math.max(...lanes.map((t) => t.lastAt ?? t.createdAt), last?.at ?? 0);
+    const single = lanes[0];
+    return (
+      <div className="group/agent relative">
+        <button
+          onClick={() => dispatch({ type: "select", id: bot.id })}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onMenu({ botId: bot.id, x: e.clientX, y: e.clientY });
+          }}
+          className={cn(
+            "flex h-[38px] w-full items-center gap-2.5 rounded-xl px-2.5 text-left transition-[background-color,scale] duration-150 ease-out active:scale-[0.99]",
+            // an agent with several conversations is a heading for them; the
+            // conversation rows carry the selection
+            selected && !many ? "bg-accent" : "hover:bg-accent/60",
+          )}
+        >
+          <AgentAvatar bot={bot} size={24} />
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-[13.5px] font-semibold text-foreground">
+            {bot.pinned && <Pin size={11} className="shrink-0 text-muted-foreground" />}
+            <span className="truncate">{bot.name}</span>
+          </span>
+          {!many && single?.state === "needs-you" ? (
+            <span className="shrink-0 text-[11px] text-warning">waiting</span>
+          ) : !many && (bot.busy || single?.state === "working") ? (
+            <span className="shrink-0 text-[11px] text-muted-foreground">working</span>
+          ) : (
+            newest > 0 && (
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/80 transition-opacity duration-150 group-hover/agent:opacity-0">
+                {formatWhen(newest)}
+              </span>
+            )
+          )}
+          {!many && bot.unread && <span className="size-1.5 shrink-0 rounded-full bg-brand" />}
+        </button>
+        {/* a new conversation, from the agent it is with */}
+        <button
+          onClick={() => {
+            dispatch({ type: "select", id: bot.id });
+            dispatch({ type: "newTask", botId: bot.id });
+          }}
+          title={`New conversation with ${bot.name}`}
+          aria-label={`New conversation with ${bot.name}`}
+          className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/agent:opacity-100"
+        >
+          <Plus size={14} />
+        </button>
+      </div>
     );
   }
   return (
@@ -473,7 +529,7 @@ function useActivityCount(): { running: number; waiting: number; suggested: numb
 
 export function Sidebar() {
   const { state, dispatch } = useStore();
-  const { resolvedTheme, setTheme } = useTheme();
+  const [conversations, setConversations] = useConversationsView();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [filing, setFiling] = useState<FilingState | null>(null);
   const activity = useActivityCount();
@@ -597,11 +653,11 @@ export function Sidebar() {
     <DropdownMenuContent align="end" className="min-w-[160px]">
       <DropdownMenuItem onClick={() => dispatch({ type: "toggleNewAgent", open: true })}>
         <BotIcon size={15} />
-        New Bot
+        New agent
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => dispatch({ type: "toggleNewRoom", open: true })}>
         <Users size={15} />
-        New Room
+        New room
       </DropdownMenuItem>
       {/* On a phone the footer is gone, so everything that lives there
           has to be here instead. All four of them: a surface with no way
@@ -828,6 +884,8 @@ export function Sidebar() {
         </button>
       )}
 
+      <WaitingRow rail={rail} />
+
       {/* The list. Filed rows stand under their section's heading; the
           unfiled majority keeps the plain Rooms and Agents lists it has
           always had, so sections cost nothing until the first one is
@@ -854,14 +912,28 @@ export function Sidebar() {
               {rail ? (
                 <div className="mx-3 my-1 border-t" />
               ) : (
-                <div className="px-2.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                <div className="flex items-center justify-between px-2.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                   Agents
+                  <button
+                    onClick={() => setConversations(!conversations)}
+                    aria-pressed={conversations}
+                    className={cn(
+                      "rounded p-0.5 transition-colors hover:text-foreground",
+                      conversations && "text-foreground",
+                    )}
+                    title={conversations ? "Hide conversations" : "Show each agent's conversations"}
+                  >
+                    <ListTree size={12} />
+                  </button>
                 </div>
               )}
             </>
           )}
           {(rail ? visibleBots : inSection(visibleBots, null)).map((b) => (
-            <BotListItem key={b.id} bot={b} onMenu={setMenu} rail={rail} />
+            <div key={b.id} className="flex flex-col">
+              <BotListItem bot={b} onMenu={setMenu} rail={rail} compact={conversations} />
+              {!rail && <ConversationRows bot={b} open={conversations} />}
+            </div>
           ))}
           {!rail &&
             sectionNames(visibleBots, state.bloks).map((name) => {
@@ -895,7 +967,10 @@ export function Sidebar() {
                     <RoomListItem key={b.id} blok={b} onFile={setFiling} />
                   ))}
                   {shownInSection(bots, isFolded, state.selectedId, searching).map((b) => (
-                    <BotListItem key={b.id} bot={b} onMenu={setMenu} />
+                    <div key={b.id} className="flex flex-col">
+                      <BotListItem bot={b} onMenu={setMenu} compact={conversations} />
+                      <ConversationRows bot={b} open={conversations && !isFolded} />
+                    </div>
                   ))}
                 </div>
               );
@@ -908,102 +983,17 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Footer */}
-      <div className={cn("border-t pb-2 pt-1.5", rail ? "px-2" : "px-2")}>
-        {(
-          [
-            [Sunrise, "Brief", () => dispatch({ type: "toggleBrief", open: true })],
-            [Activity, "Activity", () => dispatch({ type: "toggleActivity", open: true })],
-            [FolderKanban, "Projects", () => dispatch({ type: "toggleProjects", open: true })],
-            [Brain, "Memory", () => dispatch({ type: "toggleMemory", open: true, botId: null })],
-            [FlaskConical, "Rehearsals", () => dispatch({ type: "toggleRehearsals", open: true })],
-            [CalendarClock, "Routines", () => dispatch({ type: "toggleRoutines", open: true })],
-            [Sparkles, "Skills", () => dispatch({ type: "toggleSkills", open: true })],
-            [Puzzle, "Plugins", () => dispatch({ type: "togglePlugins", open: true })],
-          ] as const
-        ).map(([Icon, label, onClick]) => (
-          <button
-            key={label}
-            onClick={onClick}
-            title={label}
-            className={cn(
-              "flex items-center gap-2.5 rounded-lg py-1.5 text-left text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground",
-              rail ? "relative mx-auto px-1.5" : "w-full px-2.5",
-            )}
-          >
-            <Icon size={16} />
-            {!rail && label}
-            {label === "Rehearsals" && rehearsalsReady > 0 && (
-              <span
-                className={cn(
-                  "ml-auto rounded-md bg-primary/12 px-1.5 py-0.5 text-[10.5px] tabular-nums text-foreground",
-                  rail && "absolute right-1 top-0.5 ml-0 px-1",
-                )}
-                title={`${rehearsalsReady} ready to review`}
-              >
-                {rehearsalsReady}
-              </span>
-            )}
-            {label === "Memory" && notesWaiting > 0 && (
-              <span
-                className={cn(
-                  "ml-auto rounded-md bg-primary/12 px-1.5 py-0.5 text-[10.5px] tabular-nums text-foreground",
-                  rail && "absolute right-1 top-0.5 ml-0 px-1",
-                )}
-                title={`${notesWaiting} ready to review`}
-              >
-                {notesWaiting}
-              </span>
-            )}
-            {label === "Brief" && briefNew && (
-              <span
-                className={cn("ml-auto size-2 rounded-full bg-brand", rail && "absolute right-1.5 top-1.5 ml-0")}
-                title="A new brief is ready"
-              />
-            )}
-            {((label === "Activity" && (activity.waiting > 0 || activity.running > 0)) ||
-              (label === "Skills" && activity.suggested > 0)) && (
-              <span
-                className={cn(
-                  "ml-auto rounded-md px-1.5 py-0.5 text-[10.5px] tabular-nums",
-                  label === "Skills" || activity.waiting > 0
-                    ? "bg-warning/15 text-warning"
-                    : "bg-muted text-muted-foreground",
-                  rail && "absolute right-1 top-0.5 ml-0 px-1",
-                )}
-              >
-                {label === "Skills"
-                  ? activity.suggested
-                  : activity.waiting > 0
-                    ? activity.waiting
-                    : activity.running}
-              </span>
-            )}
-          </button>
-        ))}
-        <div className={cn("mt-0.5 flex items-center", rail ? "flex-col gap-0.5" : "gap-0.5")}>
-          <button
-            onClick={() => dispatch({ type: "toggleAppSettings" })}
-            title="Settings"
-            className={cn(
-              "flex items-center gap-2.5 rounded-lg py-1.5 text-left text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground",
-              rail ? "px-1.5" : "min-w-0 flex-1 px-2.5",
-            )}
-          >
-            <SettingsIcon size={16} />
-            {!rail && "Settings"}
-          </button>
-          {!rail && (
-            <button
-              onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-              className="rounded-lg p-1.5 text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground active:scale-95"
-              title={resolvedTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              {resolvedTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
-          )}
-        </div>
-      </div>
+      <SidebarFooter
+        rail={rail}
+        counts={{
+          briefNew,
+          waiting: activity.waiting,
+          running: activity.running,
+          rehearsalsReady,
+          skillsSuggested: activity.suggested,
+          notesWaiting,
+        }}
+      />
 
       {menu && <BotContextMenu menu={menu} onClose={() => setMenu(null)} onFile={setFiling} />}
       {filing && <SectionPicker filing={filing} onClose={() => setFiling(null)} />}

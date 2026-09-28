@@ -66,8 +66,7 @@ export function RehearsalsPanel() {
   }, [attempts]);
 
   const open = (a: Attempt) => {
-    dispatch({ type: "select", id: a.botId });
-    dispatch({ type: "selectTask", botId: a.botId, taskId: a.taskId });
+    dispatch({ type: "select", id: a.botId, lane: a.taskId });
     close();
   };
 
@@ -77,7 +76,7 @@ export function RehearsalsPanel() {
       onClick={close}
     >
       <div
-        className="flex h-[84%] w-[980px] max-w-[94vw] animate-pop-in flex-col overflow-hidden rounded-2xl border bg-popover shadow-2xl shadow-[--shadow-color]"
+        className="flex h-[84%] w-[980px] max-w-[94vw] animate-pop-in flex-col overflow-hidden rounded-2xl border bg-popover shadow-2xl shadow-(color:--shadow-color)"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Rehearsals"

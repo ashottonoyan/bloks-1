@@ -288,7 +288,7 @@ export function SkillsPanel() {
       onClick={close}
     >
       <div
-        className="flex h-[76%] w-[560px] max-w-[92vw] animate-pop-in flex-col rounded-2xl border bg-popover p-4 shadow-2xl shadow-[--shadow-color] sm:p-5"
+        className="flex h-[76%] w-[560px] max-w-[92vw] animate-pop-in flex-col rounded-2xl border bg-popover p-4 shadow-2xl shadow-(color:--shadow-color) sm:p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">

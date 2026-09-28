@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MotionConfig } from "motion/react";
 import Loader2 from "lucide-react/dist/esm/icons/loader-2.mjs";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
@@ -42,9 +43,11 @@ function Shell() {
   return (
     <div className="relative flex h-full min-w-0 flex-col overflow-hidden md:flex-row">
       <Sidebar />
-      {/* Automations lives beside the sidebar like any other view, so
-          opening it never hides the agent list. */}
-      {state.routinesOpen ? (
+      {/* Settings and Automations live beside the sidebar like any other
+          view, so opening one never hides the agent list. */}
+      {state.appSettingsOpen ? (
+        <AppSettingsPanel />
+      ) : state.routinesOpen ? (
         <AutomationsPanel onClose={() => dispatch({ type: "toggleRoutines", open: false })} />
       ) : room ? (
         <RoomView blok={room} />
@@ -65,7 +68,6 @@ function Shell() {
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
       {state.computerOpen && bot && <ComputerPanel bot={bot} />}
-      {state.appSettingsOpen && <AppSettingsPanel />}
       {state.pluginsOpen && <PluginsPanel />}
       {state.skillsOpen && <SkillsPanel />}
       {state.newRoomOpen && <NewRoomDialog />}
@@ -120,10 +122,14 @@ export default function App() {
   }, [forced]);
   if (!settled) return <div className="h-full bg-background" />;
   return (
-    <StoreProvider>
-      <Shell />
-      {setupOpen && !introOpen && <Onboarding onDone={() => setSetupOpen(false)} />}
-      {introOpen && <Intro onDone={() => setIntroOpen(false)} />}
-    </StoreProvider>
+    // Reduce motion on the Mac means reduce it here: movement goes, and
+    // the opacity that explains a change stays.
+    <MotionConfig reducedMotion="user">
+      <StoreProvider>
+        <Shell />
+        {setupOpen && !introOpen && <Onboarding onDone={() => setSetupOpen(false)} />}
+        {introOpen && <Intro onDone={() => setIntroOpen(false)} />}
+      </StoreProvider>
+    </MotionConfig>
   );
 }

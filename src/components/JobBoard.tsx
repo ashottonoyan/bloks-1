@@ -191,10 +191,7 @@ export function JobBoard() {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        dispatch({ type: "select", id: agent.id });
-                        if (job.threadId) {
-                          dispatch({ type: "selectTask", botId: agent.id, taskId: job.threadId });
-                        }
+                        dispatch({ type: "select", id: agent.id, lane: job.threadId });
                       }}
                     >
                       Watch

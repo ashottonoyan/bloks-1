@@ -396,6 +396,8 @@ export interface AppState {
   pluginsOpen: boolean;
   computerOpen: boolean;
   appSettingsOpen: boolean;
+  /** Which Settings page is showing, so a link can open the right one. */
+  settingsPage: string;
   newAgentOpen: boolean;
   /** the new-agent screen is the last step of setup, not a normal visit */
   newAgentFirstRun: boolean;
@@ -459,7 +461,8 @@ export type Action =
   | { type: "connectProvider"; kind: string; key?: string; url?: string }
   | { type: "disconnectProvider"; kind: string }
   | { type: "configStatus"; config: ConfigStatus }
-  | { type: "select"; id: string }
+  /** `lane` opens that conversation; without it, the one that pinged. */
+  | { type: "select"; id: string; lane?: string }
   | { type: "send"; botId: string; text: string; replyTo?: Message["replyTo"] }
   | { type: "answerCard"; botId: string; messageId: string; answer: string; roomId?: string }
   | { type: "dismissCard"; botId: string; messageId: string; roomId?: string }
@@ -492,7 +495,8 @@ export type Action =
   | { type: "toggleSettings"; open?: boolean }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
-  | { type: "toggleAppSettings"; open?: boolean }
+  /** `page` opens Settings on that page (see SETTINGS_PAGES). */
+  | { type: "toggleAppSettings"; open?: boolean; page?: string }
   | { type: "toggleProjects"; open?: boolean }
   | { type: "toggleMemory"; open?: boolean; botId?: string | null }
   | { type: "toggleRehearsals"; open?: boolean }
@@ -689,7 +693,16 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, config: action.config };
     case "select":
       writeSelected(action.id);
-      return updateBot({ ...state, selectedId: action.id }, action.id, (b) => readOpenLane(b));
+      // choosing a conversation in the sidebar means looking at it, so a
+      // full page covering the chat steps aside
+      return updateBot({ ...state, selectedId: action.id, routinesOpen: false, appSettingsOpen: false }, action.id, (b) =>
+        action.lane && b.tasks
+          ? (() => {
+              const tasks = b.tasks.map((t) => (t.id === action.lane ? { ...t, unread: false } : t));
+              return { ...b, tasks, unread: tasks.some((t) => t.unread) };
+            })()
+          : readOpenLane(b),
+      );
     // settle the card locally now; the server's own patch arrives a
     // moment later saying the same thing
     case "answerCard":
@@ -718,7 +731,10 @@ export function reducer(state: AppState, action: Action): AppState {
     case "toggleSkills":
       return { ...state, skillsOpen: action.open ?? !state.skillsOpen };
     case "toggleRoutines":
-      return { ...state, routinesOpen: action.open ?? !state.routinesOpen };
+      {
+        const open = action.open ?? !state.routinesOpen;
+        return { ...state, routinesOpen: open, appSettingsOpen: open ? false : state.appSettingsOpen };
+      }
     case "toggleActivity":
       return { ...state, activityOpen: action.open ?? !state.activityOpen };
     case "newTask":
@@ -881,6 +897,9 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         appSettingsOpen: open,
+        settingsPage: action.page ?? (open && !state.appSettingsOpen ? "general" : state.settingsPage),
+        // a full page, like Automations: one of them at a time
+        routinesOpen: open ? false : state.routinesOpen,
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
         pluginsOpen: open ? false : state.pluginsOpen,
@@ -942,6 +961,7 @@ export const initialState: AppState = {
   pluginsOpen: false,
   computerOpen: false,
   appSettingsOpen: false,
+  settingsPage: "general",
   newAgentOpen: false,
   newAgentFirstRun: false,
   skillsOpen: false,

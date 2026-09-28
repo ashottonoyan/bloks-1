@@ -714,7 +714,7 @@ export function RoomView({ blok }: { blok: Blok }) {
         )}
         {mentionMatches.length > 0 && (
           <div className="mx-auto mb-1.5 max-w-[760px]">
-            <div className="overflow-hidden rounded-xl border bg-popover p-1 shadow-lg shadow-[--shadow-color]">
+            <div className="overflow-hidden rounded-xl border bg-popover p-1 shadow-lg shadow-(color:--shadow-color)">
               {mentionMatches.map((m, i) => (
                 <button
                   key={m.id}
@@ -845,7 +845,7 @@ function RoomFolderButton({ blok }: { blok: Blok }) {
         <FolderOpen size={16} className={shown ? "text-brand-ink" : undefined} />
       </Button>
       {open && (
-        <div className="absolute right-0 top-11 z-30 w-[320px] max-w-[92vw] animate-pop-in rounded-2xl border bg-popover p-3.5 shadow-xl shadow-[--shadow-color]">
+        <div className="absolute right-0 top-11 z-30 w-[320px] max-w-[92vw] animate-pop-in rounded-2xl border bg-popover p-3.5 shadow-xl shadow-(color:--shadow-color)">
           <div className="text-[13px] font-semibold text-foreground">Shared working folder</div>
           {pinned ? (
             <>

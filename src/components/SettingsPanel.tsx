@@ -636,7 +636,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 /**
  * How much this agent may do without asking. Three positions, widening:
  * everything cards, file edits wave through, everything waves through.
- * Deny rules in Settings > Rules outrank all three, so "auto" is a
+ * Deny rules in Settings, Rules and approvals outrank all three, so "auto" is a
  * shorter leash than it sounds when the user has written any.
  */
 function ApprovalsCard({ bot }: { bot: Bot }) {
@@ -676,7 +676,7 @@ function ApprovalsCard({ bot }: { bot: Bot }) {
     <div className="mt-4 rounded-2xl border bg-card p-4">
       <div className="flex items-center gap-1.5 text-[13.5px] font-semibold text-foreground">
         Approvals
-        <InfoTip text="A mode only widens what is allowed. Anything you have forbidden under Settings > Rules stays refused in every mode, and answers you chose to remember from approval cards keep working too." />
+        <InfoTip text="A mode only widens what is allowed. Anything you have forbidden under Settings, Rules and approvals stays refused in every mode, and answers you chose to remember from approval cards keep working too." />
       </div>
       <div className="mt-0.5 text-[12.5px] text-muted-foreground">
         {OPTIONS.find((o) => o.id === mode)?.hint}
@@ -829,7 +829,7 @@ function ConnectedAppsCard({
             ? allowed
               ? "This agent can use your connected apps (Slack, Gmail, and the rest)."
               : "Blocked from your connected apps; it works with its own tools only."
-            : "No connector key yet. Add one in Settings → Apps."}
+            : "No connector key yet. Add one in Settings, Apps and keys."}
         </div>
       </div>
       <Switch

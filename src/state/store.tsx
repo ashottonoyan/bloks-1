@@ -300,8 +300,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const bot = stateRef.current.bots.find((b) => b.id === action.id);
           if (!bot) break;
           // The dot on an agent is about one conversation; go to it, and
-          // opening it reads it. Otherwise read the one that is open.
-          const pinged = pingedLane(bot);
+          // opening it reads it. Otherwise read the one that is open. A
+          // conversation picked by name wins over both.
+          const open = bot.activeTaskId ?? bot.threadId;
+          const pinged = action.lane ? (action.lane === open ? null : action.lane) : pingedLane(bot);
           if (pinged) {
             api(`/api/bots/${bot.id}/tasks/${pinged}/activate`, { method: "POST" })
               .then((r) => r.bot && rawDispatch({ type: "botPatched", bot: r.bot }))

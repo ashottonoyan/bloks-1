@@ -169,7 +169,7 @@ export function NewRoomDialog() {
       onClick={close}
     >
       <div
-        className="flex max-h-[80%] w-[520px] max-w-[92vw] animate-pop-in flex-col rounded-2xl border bg-popover p-4 shadow-2xl shadow-[--shadow-color] sm:p-5"
+        className="flex max-h-[80%] w-[520px] max-w-[92vw] animate-pop-in flex-col rounded-2xl border bg-popover p-4 shadow-2xl shadow-(color:--shadow-color) sm:p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">

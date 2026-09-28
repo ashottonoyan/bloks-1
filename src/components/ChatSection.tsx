@@ -352,7 +352,7 @@ function EmailCard() {
       </div>
       {!status.cloud && !status.enabled && (
         <div className="mt-3 rounded-lg bg-muted/60 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground">
-          Needs Bloks Cloud: mail reaches this computer through it. Turn it on in Settings, Devices.
+          Needs Bloks Cloud: mail reaches this computer through it. Turn it on under Bloks Cloud.
         </div>
       )}
       {status.enabled && (

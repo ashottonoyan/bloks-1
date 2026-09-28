@@ -230,9 +230,7 @@ function Detail({ w, onChanged }: { w: WatcherRow; onChanged: () => void }) {
             variant="ghost"
             size="sm"
             onClick={() => {
-              dispatch({ type: "toggleRoutines", open: false });
-              dispatch({ type: "select", id: bot.id });
-              dispatch({ type: "selectTask", botId: bot.id, taskId: w.laneId! });
+              dispatch({ type: "select", id: bot.id, lane: w.laneId! });
             }}
           >
             Open its lane

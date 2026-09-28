@@ -168,7 +168,7 @@ export function MessageActionBar({
       )}
     >
       {picking && onReact && (
-        <div className="absolute bottom-full right-0 mb-1.5 flex gap-0.5 rounded-full border bg-popover p-1 shadow-lg shadow-[--shadow-color]">
+        <div className="absolute bottom-full right-0 mb-1.5 flex gap-0.5 rounded-full border bg-popover p-1 shadow-lg shadow-(color:--shadow-color)">
           {QUICK_REACTIONS.map((emoji) => (
             <button
               key={emoji}

@@ -209,7 +209,7 @@ export function EnginesPanel() {
       <div className="mt-4 overflow-hidden rounded-2xl border bg-card">
         <div className="px-4 pb-3 pt-4">
           <div className="flex items-baseline justify-between gap-2">
-            <div className="text-[13.5px] font-semibold text-foreground">Engines</div>
+            <div className="text-[13.5px] font-semibold text-foreground">Your engines</div>
             <div className="text-[11.5px] text-muted-foreground">{connected} connected</div>
           </div>
           <div className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">

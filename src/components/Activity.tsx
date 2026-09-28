@@ -149,8 +149,7 @@ export function ActivityPanel() {
   const botOf = (id: string) => state.bots.find((b) => b.id === id);
 
   const goTo = (row: { botId: string; threadId: string }) => {
-    dispatch({ type: "select", id: row.botId });
-    dispatch({ type: "selectTask", botId: row.botId, taskId: row.threadId });
+    dispatch({ type: "select", id: row.botId, lane: row.threadId });
     close();
   };
 
@@ -187,7 +186,7 @@ export function ActivityPanel() {
     >
       <div
         className={cn(
-          "flex h-[80%] max-w-[92vw] animate-pop-in flex-col rounded-2xl border bg-popover p-4 shadow-2xl shadow-[--shadow-color] sm:p-5",
+          "flex h-[80%] max-w-[92vw] animate-pop-in flex-col rounded-2xl border bg-popover p-4 shadow-2xl shadow-(color:--shadow-color) sm:p-5",
           view === "map" ? "w-[960px]" : "w-[640px]",
         )}
         onClick={(e) => e.stopPropagation()}

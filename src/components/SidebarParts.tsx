@@ -198,7 +198,7 @@ function Count({ n, tone = "muted" }: { n: number; tone?: "muted" | "warning" | 
  * so nothing that used to be one click away is more than two.
  */
 export function SidebarFooter({ rail, counts }: { rail: boolean; counts: FooterCounts }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const side = rail ? "right" : "top";
   const align = rail ? "end" : "start";
   const tab = cn(
@@ -289,7 +289,14 @@ export function SidebarFooter({ rail, counts }: { rail: boolean; counts: FooterC
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <button onClick={() => dispatch({ type: "toggleAppSettings", open: true })} className={tab} title="Settings" aria-label="Settings">
+      <button
+        onClick={() => dispatch({ type: "toggleAppSettings", open: !state.appSettingsOpen })}
+        data-state={state.appSettingsOpen ? "open" : "closed"}
+        aria-current={state.appSettingsOpen ? "page" : undefined}
+        className={tab}
+        title="Settings"
+        aria-label="Settings"
+      >
         <SettingsIcon size={17} />
         {!rail && "Settings"}
       </button>

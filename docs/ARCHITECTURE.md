@@ -254,6 +254,33 @@ conversation, search, the latest brief, what is waiting). It has no tool
 that approves, deletes or configures. `/api/mcp-config` gives the command
 to paste, using the runtime the server itself runs on.
 
+## Lanes, unread and the sidebar
+
+An agent keeps up to twenty lanes (`MAX_TASKS` in `server/store.ts`), each
+its own transcript, engine cursors and busy flag. Closing the last lane
+opens a fresh General in its place, because the active lane is what
+`threadId` names everywhere and an agent without one would be a special
+case in every route. A routine can name the lane it runs in
+(`routine.thread`), so two routines stop sharing one context.
+
+Unread is per lane: a turn that ends in a lane marks that lane
+(`store.markLane`), and the agent's own `unread` is kept as "any lane
+unread" so the iPhone app and the Dock badge read it unchanged. Opening a
+lane (`POST .../tasks/:id/activate`) reads it; `PATCH /api/bots/:id` with
+`unread` reads or marks the lane on screen. The client's `select` goes to
+the lane that pinged (`pingedLane` in `src/state/reducer.ts`) unless it is
+given one, so a dot on an agent always leads somewhere. `clientBot` ships
+each lane's `unread` and `lastAt` for the sidebar.
+
+The sidebar's conversations view (`src/components/SidebarParts.tsx`) is a
+per-device choice in `localStorage`. Settings is a page beside the
+sidebar, like Automations, with its pages listed once in
+`SETTINGS_PAGES` (`src/components/AppSettingsPanel.tsx`); anything that
+links into Settings passes a `page`, and the command palette searches the
+same list. Escape is handled once (`src/lib/useEscape.ts`): the most
+recently opened surface that asked for it closes, and Radix menus and
+dialogs keep their own.
+
 ## Boundaries worth knowing
 
 - `server/http-guard.ts` checks `Origin` and `Host` on every request.

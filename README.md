@@ -60,6 +60,24 @@ OpenAI-compatible host takes a base URL and one or more keys. OpenRouter has a
 proper browser sign-in; the rest take a key or ride along with a CLI you
 already signed in to.
 
+**Every conversation in view.** An agent keeps up to twenty
+conversations, one topic each. Turn on **Show conversations** and they
+are listed under their agent in the sidebar, each with its own unread
+dot and whether it is working or waiting on you. Opening an agent goes
+to the conversation that pinged you, and a row at the top of the
+sidebar says when anything at all is waiting on you. Double-click a
+conversation's tab to rename it; close the last one and a fresh one
+takes its place.
+
+<p align="center">
+  <img alt="The sidebar with each agent's conversations listed under it, one of them unread" src="docs/screenshots/conversations.png" width="720">
+</p>
+
+**Settings you can find.** Settings is a page of its own, grouped by
+you, your agents, what they connect to and what they leave behind, with
+a search that goes straight to the page a word lives on. So does
+Cmd+K: type "voice" or "telegram" and press Enter.
+
 **Skills are files you can read.** A skill is markdown that gets folded
 into an agent's prompt. Bloks ships a starter library and shows you the
 full body of anything before it is installed, because a skill is closer
@@ -134,7 +152,7 @@ request, decrypted on the phone, with Allow and Deny behind Face ID;
 anything in the share sheet can be sent to an agent; and Siri, Shortcuts
 or the Action Button can ask one without opening the app. With Bloks Cloud, the same app you
 use on your Mac also opens at [bloks.dev/web](https://bloks.dev/web) on
-any computer: Settings, Devices, **Use in a browser** makes a one-time
+any computer: Settings, Phone and devices, **Use in a browser** makes a one-time
 link. Every request is sealed in the browser for your Mac alone, so the
 site that serves the page never sees what it carries.
 
@@ -202,7 +220,7 @@ day. ElevenLabs and OpenAI voices are there when you add a key.
 **From your other AI apps.** Bloks is an MCP server: Claude Desktop,
 Claude Code or Cursor can ask your agents for work, read their
 conversations and see what is waiting on you. It cannot answer
-approvals, delete anything or change settings. Settings, Apps shows what
+approvals, delete anything or change settings. Settings, Apps and keys shows what
 to paste.
 
 **Always on.** Agents run where Bloks runs, and a laptop sleeps. Bloks
@@ -275,9 +293,9 @@ Mac, a Windows PC or Linux; the iPhone app calls it "your Mac" either way.
 
 ### On your computer
 
-**1. Open Settings at the bottom of the sidebar and choose Devices.**
+**1. Open Settings at the bottom of the sidebar and choose Phone and devices.**
 
-<img src="docs/screenshots/pairing/desktop-settings.png" alt="Bloks Settings open on the Devices tab" width="720">
+<img src="docs/screenshots/pairing/desktop-settings.png" alt="Bloks Settings open on the Phone and devices page" width="720">
 
 **2. Switch on Phones and devices, then press Restart now.** Bloks only
 starts listening on your network when it starts, so this is needed once. If

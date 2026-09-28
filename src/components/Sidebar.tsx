@@ -51,6 +51,9 @@ function preview(bot: Bot): string {
   // user should open next
   if (bot.tasks?.some((t) => t.state === "needs-you")) return "Waiting for you…";
   if (bot.busy) return "Working…";
+  // an empty lane on an agent that has others is a fresh conversation,
+  // not a fresh agent, which is what the shared wording would say
+  if (!bot.messages.length && (bot.tasks?.length ?? 0) > 1) return "New conversation";
   return previewLine(bot.messages[bot.messages.length - 1]);
 }
 

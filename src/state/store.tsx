@@ -24,6 +24,9 @@ import { maybeAutoSpeak } from "@/components/Voice";
 import {
   configFromFrame,
   findCard,
+  openLaneUnread,
+  pingedLane,
+  readOpenLane,
   initialState,
   reducer,
   settleUnanswered,
@@ -295,7 +298,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "select": {
           const bot = stateRef.current.bots.find((b) => b.id === action.id);
-          if (bot?.unread) {
+          if (!bot) break;
+          // The dot on an agent is about one conversation; go to it, and
+          // opening it reads it. Otherwise read the one that is open.
+          const pinged = pingedLane(bot);
+          if (pinged) {
+            api(`/api/bots/${bot.id}/tasks/${pinged}/activate`, { method: "POST" })
+              .then((r) => r.bot && rawDispatch({ type: "botPatched", bot: r.bot }))
+              .catch(showError);
+          } else if (openLaneUnread(bot)) {
             api(`/api/bots/${action.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) }).catch(() => {});
           }
           break;
@@ -517,10 +528,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "bot": {
           const bot = frame.bot as Partial<Bot> & { id: string };
-          // an unread badge on the thread already open is wrong the
-          // moment it arrives
-          if (bot.unread && bot.id === stateRef.current.selectedId) {
-            bot.unread = false;
+          // an unread badge on the conversation already open is wrong the
+          // moment it arrives; another lane that pinged stays unread
+          if (bot.id === stateRef.current.selectedId && bot.threadId && openLaneUnread(bot as Bot)) {
+            Object.assign(bot, readOpenLane(bot as Bot));
             fetch(`/api/bots/${bot.id}`, {
               method: "PATCH",
               headers: { "content-type": "application/json" },

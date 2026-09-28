@@ -177,6 +177,10 @@ export interface TaskRecord {
   id: ThreadId;
   title: string;
   busy?: boolean;
+  /** Something landed here that nobody has read. Per lane, so opening an
+   * agent can go to the conversation that pinged you rather than the one
+   * you last had open; the agent's own flag is "any of these". */
+  unread?: boolean;
   /** The folder this lane's session is pinned to. Engines key their
    * sessions to a directory, so a lane keeps the folder its first turn
    * ran in even if the bot's setting changes later. null means "the
@@ -620,12 +624,25 @@ export class Store {
     try {
       unlinkSync(messagesFile(task.id));
     } catch {}
+    // a closed lane's unread goes with it
+    bot.unread = bot.tasks.some((t) => t.unread);
     if (bot.activeTaskId === task.id) {
       this.setActiveTask(botId, bot.tasks[0].id);
     } else {
       this.saveBots();
     }
     return "ok";
+  }
+
+  /** Read or unread, one lane at a time, with the agent's flag following
+   * as "any lane unread" so every older reader of it stays right. */
+  markLane(botId: string, taskId: string, unread: boolean) {
+    const bot = this.bot(botId);
+    const task = bot?.tasks.find((t) => t.id === taskId);
+    if (!bot || !task) return;
+    task.unread = unread || undefined;
+    bot.unread = bot.tasks.some((t) => t.unread);
+    this.saveBots();
   }
 
   patchTaskTitle(botId: string, taskId: string, title: string) {

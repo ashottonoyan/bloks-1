@@ -744,10 +744,14 @@ function clientBot(bot: BotRecord | null) {
       // model will take: see server/context.ts.
       const limit = contextLimitFor(bot.modelSelection?.model);
       const fill = pressure(task.lastInput ?? 0, limit);
+      const said = store.messagesFor(task.id);
       return {
         id: task.id,
         title: task.title,
         state,
+        unread: Boolean(task.unread),
+        // when this lane last had anything in it, for the sidebar's times
+        lastAt: said[said.length - 1]?.at ?? task.createdAt,
         createdAt: task.createdAt,
         usage: task.usage,
         context: {
@@ -1625,7 +1629,8 @@ bus.subscribe((event: RuntimeEvent) => {
       if (mailQueue.length) setTimeout(() => void drainMail(), 0);
       // whatever the agent was given to act with is spent
       agentTokens.revokeTask(event.threadId);
-      store.patchBot(bot.id, { unread: true });
+      if (bot.tasks.some((t) => t.id === event.threadId)) store.markLane(bot.id, event.threadId, true);
+      else store.patchBot(bot.id, { unread: true });
       broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
       // A routine's run ends where its turn does, and its summary is
       // what the agent actually said: a row that only says "ok" answers
@@ -2344,7 +2349,7 @@ async function startTurn(
   store.setTaskBusy(task.id, true);
   turnStarted.set(task.id, Date.now());
   notesThisTurn.delete(task.id);
-  store.patchBot(bot.id, { unread: false });
+  store.markLane(bot.id, task.id, false);
   artifactBaseline.set(task.id, artifacts.snapshot(bot.id));
   turnTokens.delete(task.id);
   broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
@@ -5902,7 +5907,13 @@ const server = createServer(async (req, res) => {
         delete body.hidden;
       }
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "shape", "skills", "skillIds", "seniority", "effort", "mascotExpression", "pinned", "hidden"] as const) {
+      // Read and unread are about the conversation on screen, not the whole
+      // agent: another lane that pinged you stays unread until it is opened.
+      if (typeof body.unread === "boolean") {
+        const target = store.bot(m[1]);
+        if (target) store.markLane(target.id, target.activeTaskId, body.unread);
+      }
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "computer", "color", "shape", "skills", "skillIds", "seniority", "effort", "mascotExpression", "pinned", "hidden"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       if (body.cwd !== undefined) {
@@ -7282,6 +7293,8 @@ const server = createServer(async (req, res) => {
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/activate$/);
     if (m && method === "POST") {
       if (!store.setActiveTask(m[1], m[2])) return json(res, 404, { error: "no such task" });
+      // opening a conversation is reading it
+      store.markLane(m[1], m[2], false);
       const fresh = store.bot(m[1])!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
       return json(res, 200, { bot: { ...clientBot(fresh), messages: store.messagesFor(m[2]) } });

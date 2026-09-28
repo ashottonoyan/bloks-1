@@ -135,6 +135,10 @@ export interface TaskSummary {
   id: string;
   title: string;
   state: "working" | "needs-you" | "idle";
+  /** Something landed here that nobody has opened yet. */
+  unread?: boolean;
+  /** When anything last happened in this lane. */
+  lastAt?: number;
   createdAt: number;
   /** Lifetime tokens spent in this lane. */
   usage?: { input: number; output: number; turns: number };
@@ -243,6 +247,36 @@ export interface AgentDefaults {
   approvals?: "edits" | "auto";
   modelSelection?: ModelSelection;
   effort?: "low" | "medium" | "high";
+}
+
+type Lane = { id: string; unread?: boolean; lastAt?: number; createdAt: number };
+type LanedBot = { activeTaskId?: string; threadId: string; unread?: boolean; tasks?: Lane[] };
+
+/** The conversation that pinged you: the most recent unread lane, when it
+ * is not the one already open. Opening an agent goes there, because the
+ * dot on the agent was about it. */
+export function pingedLane(bot: LanedBot): string | null {
+  const open = bot.activeTaskId ?? bot.threadId;
+  const waiting = (bot.tasks ?? [])
+    .filter((t) => t.unread && t.id !== open)
+    .sort((a, b) => (b.lastAt ?? b.createdAt) - (a.lastAt ?? a.createdAt));
+  return waiting[0]?.id ?? null;
+}
+
+/** The same agent with its open lane read. Its own flag follows as "any
+ * lane still unread", which is what the server says too. */
+export function readOpenLane<T extends LanedBot>(bot: T): T {
+  const open = bot.activeTaskId ?? bot.threadId;
+  if (!bot.tasks) return { ...bot, unread: false };
+  const tasks = bot.tasks.map((t) => (t.id === open ? { ...t, unread: false } : t));
+  return { ...bot, tasks, unread: tasks.some((t) => t.unread) };
+}
+
+/** Whether the lane on screen is the unread one. */
+export function openLaneUnread(bot: LanedBot): boolean {
+  const open = bot.activeTaskId ?? bot.threadId;
+  const lane = bot.tasks?.find((t) => t.id === open);
+  return lane ? Boolean(lane.unread) : Boolean(bot.unread);
 }
 
 /** A `config` frame is the whole status plus the stream's own fields.
@@ -655,7 +689,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, config: action.config };
     case "select":
       writeSelected(action.id);
-      return updateBot({ ...state, selectedId: action.id }, action.id, (b) => ({ ...b, unread: false }));
+      return updateBot({ ...state, selectedId: action.id }, action.id, (b) => readOpenLane(b));
     // settle the card locally now; the server's own patch arrives a
     // moment later saying the same thing
     case "answerCard":

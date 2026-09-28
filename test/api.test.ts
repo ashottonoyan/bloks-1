@@ -2240,6 +2240,34 @@ describe("task lanes", () => {
     assert.deepEqual(fresh.messages, [], "the new lane starts empty");
   });
 
+  test("unread is per lane: opening one reads it, and the agent stays unread while another waits", async () => {
+    const { bot } = await h.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Two Topics" }) });
+    const first = bot.activeTaskId;
+    const { bot: withSecond } = await h.json(`/api/bots/${bot.id}/tasks`, { method: "POST", body: JSON.stringify({ title: "Second" }) });
+    const second = withSecond.activeTaskId;
+    const lanes = async () => (await h.json("/api/bots")).bots.find((b: any) => b.id === bot.id);
+
+    // something lands in the second while you are looking at it, then you leave
+    await h.json(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ unread: true }) });
+    await h.json(`/api/bots/${bot.id}/tasks/${first}/activate`, { method: "POST" });
+    let now = await lanes();
+    assert.equal(now.unread, true, "the agent is unread while any lane is");
+    assert.equal(now.tasks.find((t: any) => t.id === second).unread, true);
+    assert.equal(now.tasks.find((t: any) => t.id === first).unread, false);
+    assert.equal(typeof now.tasks[0].lastAt, "number");
+
+    // reading the open lane does not read the other one
+    await h.json(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) });
+    assert.equal((await lanes()).unread, true);
+
+    // opening it does
+    await h.json(`/api/bots/${bot.id}/tasks/${second}/activate`, { method: "POST" });
+    now = await lanes();
+    assert.equal(now.unread, false);
+    assert.equal(now.tasks.every((t: any) => !t.unread), true);
+    await h.fetch(`/api/bots/${bot.id}?forget=1`, { method: "DELETE" });
+  });
+
   test("a turn in one lane leaves the other lanes free", async () => {
     // No engine is installed here, so the turn fails fast; what matters
     // is the gate: the same lane 409s while busy is set synchronously,

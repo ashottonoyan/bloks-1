@@ -36,6 +36,7 @@ import { useBriefs } from "./BriefPanel";
 import { ConversationRows, SidebarFooter, WaitingRow } from "./SidebarParts";
 import { useConversationsView } from "@/lib/conversationsView";
 import ListTree from "lucide-react/dist/esm/icons/list-tree.mjs";
+import Sunrise from "lucide-react/dist/esm/icons/sunrise.mjs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -659,10 +660,15 @@ export function Sidebar() {
         <Users size={15} />
         New room
       </DropdownMenuItem>
-      {/* On a phone the footer is gone, so everything that lives there
-          has to be here instead. All four of them: a surface with no way
-          in on the device somebody is holding is a surface that does not
-          exist for them. */}
+      {/* On a phone the footer is gone, so everything behind it has to
+          be here instead: a surface with no way in on the device somebody
+          is holding is a surface that does not exist for them. */}
+      {mobile && (
+        <DropdownMenuItem onClick={() => dispatch({ type: "toggleBrief", open: true })}>
+          <Sunrise size={15} />
+          Morning brief
+        </DropdownMenuItem>
+      )}
       {mobile && (
         <DropdownMenuItem onClick={() => dispatch({ type: "toggleActivity", open: true })}>
           <Activity size={15} />

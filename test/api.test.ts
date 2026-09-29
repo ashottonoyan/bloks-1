@@ -1277,6 +1277,45 @@ describe("defaults for new agents", () => {
     await h.fetch(`/api/bots/${two.id}?forget=1`, { method: "DELETE" });
   });
 
+  test("a signed-out Claude Code is an error that says what to do, never the agent's reply", async (t) => {
+    const home = mkdtempSync(join(tmpdir(), "bloks-signedout-"));
+    const cli = join(home, "fake-claude.mjs");
+    writeFileSync(
+      cli,
+      `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("9.9.9 (Claude Code)"); process.exit(0); }
+if (args[0] === "auth") { console.log(JSON.stringify({ loggedIn: true })); process.exit(0); }
+process.stdin.resume();
+process.stdin.on("end", () => {
+  // what the real CLI prints with nobody signed in
+  console.log(JSON.stringify({ type: "assistant", error: "authentication_failed", message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] } }));
+  console.log(JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" }));
+});
+`,
+      { mode: 0o755 },
+    );
+    mkdirSync(join(home, ".bloks"), { recursive: true });
+    writeFileSync(join(home, ".bloks", "config.json"), JSON.stringify({ instances: { claude: { driver: "claudeAgent", config: { cli } } } }));
+    const h2 = await startHarness({ HOME: home });
+    t.after(async () => {
+      await h2.stop();
+      rmSync(home, { recursive: true, force: true });
+    });
+    const { bot } = await h2.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Unsigned" }) });
+    await h2.fetch(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } }) });
+    await h2.fetch(`/api/bots/${bot.id}/messages`, { method: "POST", body: JSON.stringify({ text: "hello" }) });
+    const said = await waitFor(async () => {
+      const found = (await h2.json("/api/bots")).bots.find((b: any) => b.id === bot.id);
+      return !found.busy && found.messages.some((m: any) => m.kind === "notice") ? found.messages : null;
+    });
+    assert.ok(said, "no notice arrived");
+    assert.ok(!said.some((m: any) => m.role === "bot" && m.kind === "text" && /Not logged in/.test(m.text ?? "")), "the CLI's words were shown as the agent's");
+    const notices = said.filter((m: any) => m.kind === "notice");
+    assert.equal(notices.length, 1, "one notice, not one per layer");
+    assert.match(notices[0].text, /not signed in.*run claude/i);
+  });
+
   test("full access takes Claude Code's own prompts off, and every other mode keeps them", async (t) => {
     const home = mkdtempSync(join(tmpdir(), "bloks-full-"));
     const seen = join(home, "argv.json");

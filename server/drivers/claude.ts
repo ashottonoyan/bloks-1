@@ -409,6 +409,23 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "assistant": {
             const message = frame.message ?? {};
             const text = textOf(message.content);
+            // The CLI speaks for itself in the assistant's voice when it
+            // cannot run a turn at all ("Not logged in · Please run /login"),
+            // marked with an error. That is not the agent talking, and
+            // /login means nothing outside the CLI's own terminal, so it
+            // becomes an error that says what to do. The wording keeps
+            // "not signed in", which is what a backup engine listens for.
+            if (typeof frame.error === "string" && frame.error) {
+              emit({
+                ...envelope(threadId, turnId),
+                type: "runtime.error",
+                message:
+                  frame.error === "authentication_failed"
+                    ? "Claude Code is not signed in on this computer. Open Terminal, run claude and sign in, then send this again. Or pick another engine for this agent."
+                    : text.trim() || `Claude Code could not run this turn (${frame.error}).`,
+              });
+              break;
+            }
             // The CLI delivers whole blocks, not tokens, so the same text
             // is both the "stream" and the settled item. Emitting both
             // keeps the client's streaming buffer and its transcript fold

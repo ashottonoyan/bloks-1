@@ -740,12 +740,12 @@ function PageBody({ id }: { id: string }) {
               />
               <ApiKeyRow
                 section="box"
-                label="Box API key"
-                placeholder="Paste your Box API key"
+                label="Boat API key"
+                placeholder="Paste your Boat API key"
                 info={{
-                  text: "Gives agents an isolated remote Linux computer with a desktop and a terminal. Box is a paid service after its trial, so usage can incur charges.",
-                  linkLabel: "Open the Box API key guide",
-                  linkHref: "https://docs.ascii.dev/box/api-keys",
+                  text: "Gives agents an isolated remote Linux computer with a desktop and a terminal. Boat (formerly Box) is a paid service after its trial, so usage can incur charges.",
+                  linkLabel: "Open the Boat API key guide",
+                  linkHref: "https://docs.boat.dev/api-keys",
                 }}
               />
               <BoxSleep />

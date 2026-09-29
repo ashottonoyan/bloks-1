@@ -26,6 +26,7 @@ import { callMcpTool, listMcpTools, type McpAccess } from "../composio.ts";
 import { newEventId, newId } from "../contracts.ts";
 import type { ProviderSpec } from "../providers.ts";
 import { appendNative } from "./native.ts";
+import { BOAT_API } from "../boat.ts";
 
 export interface CompatConfig {
   url: string;
@@ -127,7 +128,6 @@ const ASK_TIMEOUT_MS = 15 * 60_000;
 const UNANSWERED =
   "Nobody answered in time. Use your best judgment and continue.";
 
-const BOX_API = "https://ascii.dev/api/box/v1";
 
 function toolSchemas(hasComputer: boolean, hasSandbox: boolean) {
   const tools: any[] = [
@@ -268,10 +268,10 @@ async function boxExec(
   computer: { boxId: string; token: string },
   command: string,
 ): Promise<string> {
-  const res = await fetch(`${BOX_API}/boxes/${computer.boxId}/commands`, {
+  const res = await fetch(`${BOAT_API}/sandboxes/${computer.boxId}/commands`, {
     method: "POST",
     headers: { authorization: `Bearer ${computer.token}`, "content-type": "application/json" },
-    body: JSON.stringify({ command: command.slice(0, 4000) }),
+    body: JSON.stringify({ command: command.slice(0, 4000), timeoutSeconds: 120 }),
     signal: AbortSignal.timeout(120_000),
   });
   const body: any = await res.json().catch(() => null);

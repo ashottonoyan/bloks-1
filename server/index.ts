@@ -320,7 +320,16 @@ bus.attach(registry.instances());
 async function defaultSelection() {
   const described = await registry.describe();
   const available = described.filter((d) => d.snapshot.state === "available");
-  const pick = available.find((d) => d.driverKind === "claudeAgent") ?? available[0] ?? described[0];
+  // Signed in beats merely installed: a new agent on a CLI nobody has
+  // logged in to fails its first message, which is the first-run problem
+  // in one line. Claude Code first among equals, as before.
+  const ready = available.filter((d) => d.snapshot.authenticated !== false);
+  const pick =
+    ready.find((d) => d.driverKind === "claudeAgent") ??
+    ready[0] ??
+    available.find((d) => d.driverKind === "claudeAgent") ??
+    available[0] ??
+    described[0];
   return { instanceId: pick?.instanceId ?? "claude", model: pick?.models.default || "claude-sonnet-5" };
 }
 
@@ -10183,11 +10192,25 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && path === "/api/connectors") {
       const services = (url.searchParams.get("services") ?? "").split(",").filter(Boolean);
       if (!cfg.composio?.key) return json(res, 200, { configured: false, services: {} });
-      const status = await composio.connectorStates(
-        cfg,
-        services.length ? services : composio.SHIPPED_CONNECTOR_SLUGS,
-      );
-      return json(res, 200, { configured: true, services: status });
+      // A status check that fails is not a broken screen: the list still
+      // renders, and the reason rides along for it to show.
+      try {
+        const status = await composio.connectorStates(
+          cfg,
+          services.length ? services : composio.SHIPPED_CONNECTOR_SLUGS,
+        );
+        return json(res, 200, { configured: true, services: status });
+      } catch (e) {
+        return json(res, 200, {
+          configured: true,
+          services: {},
+          error: redactSecrets(e instanceof Error ? e.message : String(e)),
+        });
+      }
+    }
+    m = path.match(/^\/api\/connectors\/([\w-]+)(\/authorize)?$/);
+    if (m && (method === "DELETE" || (method === "POST" && m[2])) && !cfg.composio?.key) {
+      return json(res, 400, { error: "Connecting apps needs a Composio key. Add one in Settings, Apps and keys." });
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)\/authorize$/);
     if (m && method === "POST") return json(res, 200, await composio.beginConnectorAuth(cfg, m[1]));

@@ -271,7 +271,9 @@ The first-run check, and Settings, Engines, install Claude Code, Codex,
 Pi, Antigravity and the Grok CLI with one button. They go into your own
 `~/.local`, so no admin password and no npm permission errors, and an
 engine that is installed but not signed in says so, with a button that
-opens Terminal at its sign-in. To do it by hand instead:
+opens Terminal at its sign-in. An agent whose engine is not ready says
+so above its composer before you send anything, with the same buttons and
+a one-click switch to an engine that is. To do it by hand instead:
 
 | Engine | How you connect | Runs tools |
 | --- | --- | --- |

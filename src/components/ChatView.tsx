@@ -39,6 +39,7 @@ import {
   type ReplyDraft,
 } from "./MessageActions";
 import { ModelPicker } from "./ModelPicker";
+import { EngineSetupActions } from "./EngineSetup";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
@@ -448,6 +449,91 @@ function Bubble({
 
 /** Something the agent did, as one quiet line. Spinning while it runs,
  * then a tick or a cross. */
+/**
+ * Said before the first message rather than after it: this agent's engine
+ * is missing or signed out, so anything sent now would come back as an
+ * error. The fix is right here, the same Install or Sign in the first-run
+ * check has, or Settings for an engine that runs on a key.
+ */
+function EngineBanner({ bot }: { bot: Bot }) {
+  const { state, dispatch } = useStore();
+  const instance = state.instances.find((i) => i.instanceId === bot.modelSelection?.instanceId);
+  const missing = instance ? instance.snapshot.state !== "available" : false;
+  const signedOut = Boolean(instance) && !missing && instance!.snapshot.authenticated === false;
+  const refresh = () => {
+    api("/api/instances")
+      .then(({ instances }) => dispatch({ type: "instances", instances }))
+      .catch(() => {});
+  };
+  // Signing in happens in Terminal; coming back to this window is the
+  // moment to look again, so the warning goes without a click.
+  const showing = missing || signedOut;
+  useEffect(() => {
+    if (!showing) return;
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showing]);
+  if (!instance || !showing) return null;
+  // Another engine that would answer right now, preferring one that runs
+  // tools, so the quickest fix is a single click rather than a setup.
+  const ready = state.instances.filter(
+    (i) =>
+      i.instanceId !== instance.instanceId &&
+      i.snapshot.state === "available" &&
+      i.snapshot.authenticated !== false &&
+      Boolean(i.models.default),
+  );
+  const agentic = new Set(state.providers.filter((p) => p.agentic).map((p) => p.kind));
+  const alternative = ready.find((i) => agentic.has(i.driverKind)) ?? ready[0];
+  return (
+    <div className="mx-auto w-full max-w-[760px] px-4 md:px-6">
+      <div className="mb-2 rounded-xl border border-warning/30 bg-warning/5 px-3.5 py-2.5 text-[13px] leading-relaxed">
+        <div className="flex items-start gap-2">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" />
+          <div className="min-w-0 flex-1">
+            <span className="text-foreground">
+              {missing
+                ? `${instance.displayName} isn't ready on this computer, so ${bot.name} can't answer yet.`
+                : `${instance.displayName} isn't signed in yet, so ${bot.name} can't answer.`}
+            </span>{" "}
+            <span className="text-muted-foreground">Set it up here, or pick another engine at the top right.</span>
+            {alternative && (
+              <div className="mt-2">
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    dispatch({
+                      type: "setModel",
+                      botId: bot.id,
+                      selection: { instanceId: alternative.instanceId, model: alternative.models.default },
+                    })
+                  }
+                >
+                  Use {alternative.displayName} instead
+                </Button>
+              </div>
+            )}
+            <EngineSetupActions
+              kind={instance.driverKind}
+              name={instance.displayName}
+              installed={!missing}
+              signedOut={signedOut}
+              onChanged={refresh}
+            />
+            <button
+              onClick={() => dispatch({ type: "toggleAppSettings", open: true, page: "engines" })}
+              className="mt-1.5 text-[12px] text-muted-foreground underline hover:text-foreground"
+            >
+              Open engine settings
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Something stopped the turn from running: no engine installed, a CLI
  * that is not signed in, a machine out of file handles. The message is
@@ -1063,6 +1149,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           </button>
         </div>
       )}
+      <EngineBanner bot={bot} />
       <Composer bot={bot} replyTo={replyTo} onClearReply={() => setReplyTo(null)} prefill={prefill} />
       {state.meetingFor === bot.id && <MeetingPanel bot={bot} />}
       {forwarding && (

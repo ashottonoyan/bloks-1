@@ -21,6 +21,8 @@ const CLOUD_KEY = /^blok_live_[0-9a-f]{32}$/;
 interface RelayStatus {
   enabled: boolean;
   connected: boolean;
+  /** Missing from an older server, which could not tell. */
+  delivering?: boolean;
   spaceId: string | null;
 }
 
@@ -78,6 +80,8 @@ export function CloudSection() {
   };
 
   const on = status?.enabled ?? false;
+  // green only when the answers land too, not just when the line is open
+  const working = Boolean(status?.connected) && status?.delivering !== false;
 
   return (
     <div className="mt-4 rounded-2xl border bg-card p-4">
@@ -97,12 +101,12 @@ export function CloudSection() {
           <span
             className={
               "shrink-0 rounded-full px-2 py-0.5 text-[11.5px] font-medium " +
-              (status?.connected
+              (working
                 ? "bg-success/10 text-success"
                 : "bg-warning/10 text-warning")
             }
           >
-            {status?.connected ? "Connected" : "Reconnecting"}
+            {working ? "Connected" : status?.connected ? "Replies failing" : "Reconnecting"}
           </span>
         )}
       </div>
@@ -117,7 +121,13 @@ export function CloudSection() {
         <Loader2 size={14} className="mt-3 animate-spin text-muted-foreground" />
       ) : on ? (
         <div className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
-          {status.spaceId ? (
+          {status.connected && status.delivering === false ? (
+            <>
+              {thisComputer()} can hear Bloks Cloud, but its replies are not getting through, so
+              your phone may say it cannot reach it. This is usually the network here. Bloks
+              keeps retrying and turns green once replies land.
+            </>
+          ) : status.spaceId ? (
             <>
               Active. Pair a phone above and it will reach {thisComputer()} from anywhere.
               <span className="ml-1 font-mono text-[11.5px] text-muted-foreground/70">

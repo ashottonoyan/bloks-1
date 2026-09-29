@@ -19,6 +19,10 @@ import { startHarness, type Harness } from "./helpers/server.ts";
 function stubRelay() {
   let send: ((frame: unknown) => void) | null = null;
   const results = new Map<string, { status: number; payload: string }>();
+  /** How the next result posts go wrong, one per post: a status to answer
+   * with, or "drop" to cut the socket. Empty means they land. */
+  const resultFaults: Array<number | "drop"> = [];
+  const resultAttempts = new Map<string, number>();
   const pushed: Array<{ frames: string[]; wake: string | { reason: string; sealed?: Record<string, string> } | null }> = [];
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -34,7 +38,15 @@ function stubRelay() {
     req.on("end", () => {
       const parsed = body ? JSON.parse(body) : {};
       if (path === "/space/agent/result") {
-        results.set(String(parsed.id), { status: Number(parsed.status), payload: String(parsed.payload) });
+        const id = String(parsed.id);
+        resultAttempts.set(id, (resultAttempts.get(id) ?? 0) + 1);
+        const fault = resultFaults.shift();
+        if (fault === "drop") return void req.socket.destroy();
+        if (fault) {
+          res.writeHead(fault, { "content-type": "application/json" });
+          return void res.end("{}");
+        }
+        results.set(id, { status: Number(parsed.status), payload: String(parsed.payload) });
       }
       if (path === "/space/agent/events") {
         pushed.push({ frames: parsed.frames ?? [], wake: parsed.wake ?? null });
@@ -48,6 +60,8 @@ function stubRelay() {
     server,
     ask: (id: string, payload: string) => send?.({ kind: "ask", id, payload }),
     results,
+    resultFaults,
+    resultAttempts,
     pushed,
     get connected() {
       return send !== null;
@@ -185,6 +199,51 @@ describe("the relay link", () => {
     relay.ask("ask-4", seal(sealKey, deviceId, { method: "GET", path: "/../etc/passwd" }));
     const fourth = await waitUntil(() => relay.results.get("ask-4"));
     assert.equal(fourth!.status, 404);
+  });
+
+  test("an answer lost on the way is sent again until it lands", async () => {
+    // a relay that errors once and then loses the socket: the phone still
+    // gets its answer, on the third try
+    relay.resultFaults.push(503, "drop");
+    relay.ask("ask-retry", seal(sealKey, deviceId, { method: "GET", path: "/api/bots" }));
+    const landed = await waitUntil(() => relay.results.get("ask-retry"));
+    assert.ok(landed, "a retried answer never landed");
+    assert.equal(relay.resultAttempts.get("ask-retry"), 3);
+    const answer = open(openKey, peek(landed!.payload)!) as { status: number };
+    assert.equal(answer.status, 200);
+    const state = await h.json("/api/relay/status");
+    assert.equal(state.delivering, true, "an answer that landed in the end is not a failing line");
+  });
+
+  test("a line that hears but cannot answer says so, and says so when it recovers", async () => {
+    const status = async (want: boolean) => {
+      const until = Date.now() + 10_000;
+      for (;;) {
+        const s = await h.json("/api/relay/status");
+        if (s.delivering === want || Date.now() > until) return s;
+        await new Promise((r) => setTimeout(r, 40));
+      }
+    };
+
+    // a refusal is final, so the answer is lost at once rather than after
+    // the whole retry budget, and the status must stop claiming all is well
+    relay.resultFaults.push(401);
+    relay.ask("ask-lost", seal(sealKey, deviceId, { method: "GET", path: "/api/bots" }));
+    const failing = await status(false);
+    assert.equal(failing.connected, true, "the stream itself is still up");
+    assert.equal(failing.delivering, false, "a lost answer left the status green");
+    assert.match(failing.problem ?? "", /not getting through/);
+    assert.equal(relay.resultAttempts.get("ask-lost"), 1, "a refusal was retried");
+
+    // one landed answer is not enough to call it healthy again; a short
+    // run is
+    for (const id of ["ok-1", "ok-2", "ok-3"]) {
+      relay.ask(id, seal(sealKey, deviceId, { method: "GET", path: "/api/bots" }));
+      await waitUntil(() => relay.results.get(id));
+    }
+    const back = await status(true);
+    assert.equal(back.delivering, true, "the status never recovered");
+    assert.equal(back.problem, null);
   });
 
   test("broadcasts go out sealed, and only an approval asks for a buzz, with its words sealed too", async (t) => {

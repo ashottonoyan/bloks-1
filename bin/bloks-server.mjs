@@ -59,10 +59,16 @@ async function status(waitMs = 0) {
     console.log("Turn it on with: bloks-server activate blok_live_...");
     return;
   }
+  // Connected means the stream from Cloud is open. Working means replies
+  // land too; a lossy line can have the first without the second, and a
+  // status that says "connected" then is the one that sends people hunting.
+  // An older server has no `delivering`, so only an explicit false counts.
   console.log(
-    relay.connected
-      ? "Bloks is running and connected to Bloks Cloud."
-      : `Bloks is running. Bloks Cloud is on but not connected${relay.problem ? `: ${relay.problem}` : ""}.`,
+    !relay.connected
+      ? `Bloks is running. Bloks Cloud is on but not connected${relay.problem ? `: ${relay.problem}` : ""}.`
+      : relay.delivering === false
+        ? "Bloks is running and hears Bloks Cloud, but its replies are not getting through. Retrying."
+        : "Bloks is running and connected to Bloks Cloud.",
   );
 }
 

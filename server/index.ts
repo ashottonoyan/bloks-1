@@ -6508,15 +6508,18 @@ const server = createServer(async (req, res) => {
 
     if (method === "GET" && path === "/api/relay/status") {
       if (!local) return json(res, 403, { error: "not from here" });
-      // Three facts, and they are not one fact. `enabled` is the switch
+      // Four facts, and they are not one fact. `enabled` is the switch
       // in the config, `connected` is whether the line is up this second,
-      // and `spaceId` only exists once the relay has said hello. A screen
+      // `delivering` is whether what we send back is landing, and
+      // `spaceId` only exists once the relay has said hello. A screen
       // that infers the last two from the first shows a green light while
       // the phone gets nothing.
       return json(res, 200, {
         enabled: Boolean(cfg.relay?.enabled),
         connected: relayLink.state.connected,
+        delivering: relayLink.state.delivering,
         spaceId: relayLink.state.spaceId,
+        problem: relayLink.state.problem,
       });
     }
 

@@ -125,6 +125,15 @@ carries ciphertext it cannot open. A browser keeps the two keys as
 non-extractable WebCrypto keys and never the token. Routes that mint new
 pairings answer only on this machine.
 
+The line to the relay (`server/relay-link.ts`) is two things. The stream
+in, which carries asks, is watched for silence and redialled. What goes
+back out, answers and event frames, is its own health reading: an answer
+is retried until the relay's 20 second wait is over (the relay settles an
+ask once, so a repeat is harmless), and `delivering` drops when an answer
+is lost or half the recent posts failed. Status shows green only when
+both hold, because a lossy network can keep the stream open while every
+reply goes nowhere.
+
 ## Rehearsals
 
 `server/rehearsals.ts` clones the agent's folder (copy-on-write with

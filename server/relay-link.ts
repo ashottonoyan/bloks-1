@@ -94,6 +94,11 @@ export interface RelayConfig {
 export interface RelayState {
   configured: boolean;
   connected: boolean;
+  /** Whether what this Mac sends is landing: answers to the phone's
+   * requests and the frames it pushes. The stream coming in is a
+   * separate thing, and on a lossy line it can stay open while replies
+   * go nowhere, so `connected` alone is not "working". */
+  delivering: boolean;
   spaceId: string | null;
   /** Last failure, for the settings screen. Never a secret. */
   problem: string | null;
@@ -112,6 +117,16 @@ const WATCHDOG_MS = 60_000;
  * for a slow relay hop and modest clock skew, tight enough that a
  * captured frame is useless minutes later. */
 const REPLAY_WINDOW_MS = 120_000;
+/** How long an answer keeps trying. The relay holds a phone's request for
+ * 20s and then tells it the Mac is offline, so past that a retry lands on
+ * nobody; a result it no longer waits for is a harmless 202. */
+const ANSWER_BUDGET_MS = 20_000;
+/** Outbound posts remembered for the health reading. One lost post on a
+ * rough line is noise; half of the recent ones failing is a line that
+ * looks up and is not. */
+const OUTBOUND_WINDOW = 10;
+const OUTBOUND_RECOVER = 3;
+const NOT_DELIVERING = "The line to Bloks Cloud is open, but replies are not getting through. Retrying.";
 
 export class RelayLink {
   private config: RelayConfig | null = null;
@@ -126,12 +141,21 @@ export class RelayLink {
   /** Consecutive failed pushes; enough of them means the line is dead
    * even though its read has not returned yet, so we force a redial. */
   private pushFailures = 0;
+  /** Recent outbound posts, oldest first: true for one that landed. */
+  private outbound: boolean[] = [];
   /** Nonces of mutating requests served recently, so a hostile relay
    * cannot replay a captured "approve" or "send". Bounded and time-swept;
    * the freshness window makes unbounded growth impossible anyway. */
   private seenNonces = new Set<string>();
   private nonceSweep = 0;
-  state: RelayState = { configured: false, connected: false, spaceId: null, problem: null, since: null };
+  state: RelayState = {
+    configured: false,
+    connected: false,
+    delivering: false,
+    spaceId: null,
+    problem: null,
+    since: null,
+  };
 
   /** Where to replay a decrypted request, i.e. our own loopback port. */
   private readonly port: number;
@@ -177,6 +201,7 @@ export class RelayLink {
     this.state = {
       configured: Boolean(this.config),
       connected: false,
+      delivering: false,
       spaceId: null,
       problem: null,
       since: null,
@@ -196,7 +221,7 @@ export class RelayLink {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     if (this.state.connected) {
-      this.state = { ...this.state, connected: false, spaceId: null, since: null };
+      this.state = { ...this.state, connected: false, delivering: false, spaceId: null, since: null };
       this.onChange(this.state);
     }
   }
@@ -243,15 +268,16 @@ export class RelayLink {
       body: JSON.stringify({ frames, ...(sent ? { wake: sent } : {}) }),
       signal: AbortSignal.timeout(10_000),
     })
-      .then((res) => {
-        this.pushFailures = res.ok ? 0 : this.pushFailures + 1;
-        if (this.pushFailures >= 4) this.controller?.abort();
-      })
-      .catch(() => {
+      .then((res) => res.ok)
+      .catch(() => false)
+      .then((ok) => {
         // A failed push is a dropped frame, not a broken link on its own.
         // But a run of them means the line is dead while its read still
-        // hangs, so force the redial the read has not noticed yet.
-        this.pushFailures++;
+        // hangs, so force the redial the read has not noticed yet. A line
+        // that drops every other post never makes a run, which is what
+        // the health reading is for.
+        this.pushFailures = ok ? 0 : this.pushFailures + 1;
+        this.noteOutbound(ok);
         if (this.pushFailures >= 4) this.controller?.abort();
       });
   }
@@ -425,6 +451,7 @@ export class RelayLink {
         if (res.status === 401 || res.status === 403) {
           this.setState({
             connected: false,
+            delivering: false,
             problem: `The relay is not accepting ${thisMachine()} yet. Retrying.`,
           });
           this.retry = RETRY_MAX_MS;
@@ -434,7 +461,9 @@ export class RelayLink {
         throw new Error(`relay answered ${res.status}`);
       }
 
-      this.setState({ connected: true, problem: null, since: Date.now() });
+      // a fresh line starts trusted; what it sends decides from there
+      this.outbound = [];
+      this.setState({ connected: true, delivering: true, problem: null, since: Date.now() });
       this.pushFailures = 0;
       keepalive = setInterval(() => this.publish({ kind: "ping" }), KEEPALIVE_MS);
       keepalive.unref?.();
@@ -488,7 +517,7 @@ export class RelayLink {
     } catch (e) {
       if (!alive()) return;
       const problem = e instanceof Error ? e.message : "relay link failed";
-      this.setState({ connected: false, spaceId: null, since: null, problem });
+      this.setState({ connected: false, delivering: false, spaceId: null, since: null, problem });
       this.schedule();
     } finally {
       clearTimers();
@@ -661,12 +690,7 @@ export class RelayLink {
   private answerRaw(id: string, status: number, type: string, z: string, key: Buffer, deviceId: string) {
     if (!this.config) return;
     const payload = seal(key, deviceId, { status, type, z });
-    void fetch(`${this.config.url}/space/agent/result`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ id, status, payload }),
-      signal: AbortSignal.timeout(30_000),
-    }).catch(() => {});
+    void this.deliver(JSON.stringify({ id, status, payload }), 15_000);
   }
 
   /**
@@ -716,11 +740,65 @@ export class RelayLink {
   private answer(id: string, status: number, body: unknown, key: Buffer | null, deviceId: string | null) {
     if (!this.config) return;
     const payload = key && deviceId ? seal(key, deviceId, { status, body }) : "";
-    void fetch(`${this.config.url}/space/agent/result`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ id, status, payload }),
-      signal: AbortSignal.timeout(10_000),
-    }).catch(() => {});
+    void this.deliver(JSON.stringify({ id, status, payload }), 8_000);
+  }
+
+  /**
+   * Hand one answer to the relay, and keep at it while the phone is still
+   * waiting. Safe to repeat: the relay settles an ask once and answers any
+   * later copy with a 202. Only a refusal (a 4xx other than a timeout or
+   * a rate limit) stops early, since sending it again changes nothing.
+   */
+  private async deliver(body: string, attemptMs: number): Promise<boolean> {
+    const config = this.config;
+    if (!config) return false;
+    const deadline = Date.now() + ANSWER_BUDGET_MS;
+    for (let attempt = 0; ; attempt++) {
+      const left = deadline - Date.now();
+      // pointed elsewhere or switched off since: this answer belongs to
+      // a line that no longer exists
+      if (left <= 0 || this.config !== config) break;
+      try {
+        const res = await fetch(`${config.url}/space/agent/result`, {
+          method: "POST",
+          headers: this.headers(),
+          body,
+          signal: AbortSignal.timeout(Math.min(attemptMs, left)),
+        });
+        if (res.ok) {
+          this.noteOutbound(true);
+          return true;
+        }
+        if (res.status < 500 && res.status !== 408 && res.status !== 429) break;
+      } catch {
+        // lost on the way; the next attempt may not be
+      }
+      const wait = Math.min(500 * 2 ** attempt, deadline - Date.now());
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait).unref?.());
+    }
+    // A phone just went without its answer. That is not noise to average
+    // away: say so now, and let the next posts that land clear it.
+    if (this.config === config) this.noteOutbound(false, true);
+    return false;
+  }
+
+  /** Keep `delivering` honest. It drops when half the recent posts failed,
+   * or at once when an answer was lost outright, and comes back after a
+   * short run that landed, so one lucky post does not paper over a bad
+   * line. */
+  private noteOutbound(ok: boolean, lost = false) {
+    this.outbound.push(ok);
+    if (this.outbound.length > OUTBOUND_WINDOW) this.outbound.shift();
+    if (!this.state.connected) return;
+    const failed = this.outbound.filter((x) => !x).length;
+    const recent = this.outbound.slice(-OUTBOUND_RECOVER);
+    const delivering = this.state.delivering
+      ? !lost && failed * 2 < OUTBOUND_WINDOW
+      : recent.length === OUTBOUND_RECOVER && recent.every(Boolean);
+    if (delivering === this.state.delivering) return;
+    this.setState({
+      delivering,
+      problem: delivering ? (this.state.problem === NOT_DELIVERING ? null : this.state.problem) : NOT_DELIVERING,
+    });
   }
 }

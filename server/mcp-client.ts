@@ -61,6 +61,10 @@ export const MAX_RESOURCE_BYTES = 2 * 1024 * 1024;
 
 export interface McpConnection {
   request(method: string, params?: unknown): Promise<any>;
+  /** A message that expects no answer. Sent as a request instead, with
+   * an id, a server that follows the spec never replies, and anything
+   * waiting on it waits forever. */
+  notify(method: string, params?: unknown): Promise<void>;
   close(): void;
 }
 
@@ -114,6 +118,9 @@ function connectStdio(config: McpServerConfig): McpConnection {
     request: (method, params) => {
       if (!link) return Promise.reject(new Error("the server is not running"));
       return link.request(method, params);
+    },
+    notify: async (method, params) => {
+      link?.notify(method, params);
     },
     close,
   };
@@ -170,6 +177,21 @@ function connectHttp(config: McpServerConfig): McpConnection {
       if (!response.ok) throw new Error(`that server answered HTTP ${response.status}`);
       return unwrapFrame(await response.text());
     },
+    async notify(method, params) {
+      if (closed) return;
+      // no id, and a 202 with no body is the whole answer
+      await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          ...(session ? { "mcp-session-id": session } : {}),
+          ...(config.headers ?? {}),
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", method, params }),
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      }).catch(() => {});
+    },
     close() {
       closed = true;
     },
@@ -207,7 +229,7 @@ export class McpClient {
       );
       // the spec's handshake: the server is not to be called until it has
       // been told the client is ready
-      await connection.request("notifications/initialized").catch(() => {});
+      await connection.notify("notifications/initialized").catch(() => {});
     })();
     const held: Held = { connection, ready, usedAt: Date.now() };
     this.held.set(config.id, held);

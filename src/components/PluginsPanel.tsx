@@ -7,7 +7,7 @@
 // Icons degrade in three steps, because one broken image in a grid of
 // otherwise-perfect logos looks worse than no logos at all: official
 // artwork, then the service's own favicon, then a letter.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Loader2 from "lucide-react/dist/esm/icons/loader-2.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
@@ -64,12 +64,20 @@ export function PluginsPanel() {
   // MCP server draws for itself.
   const [view, setView] = useState<"connectors" | "apps">("connectors");
 
+  // What comes back covers only the slugs asked about, so it is merged in:
+  // replacing the map made every other connected app read as disconnected
+  // the moment one was connected or dropped.
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const refreshStatus = useCallback((slugs: string[]) => {
     if (!slugs.length) return Promise.resolve();
     setRefreshing(true);
     return api(`/api/connectors?services=${slugs.join(",")}`)
-      .then((r) => setStatus(r.services ?? {}))
-      .catch(() => {})
+      .then((r) => {
+        setStatus((current) => ({ ...current, ...(r.services ?? {}) }));
+        setError(r.error ?? null);
+      })
+      .catch((e) => setError(e.message))
       .finally(() => setRefreshing(false));
   }, []);
 
@@ -95,11 +103,14 @@ export function PluginsPanel() {
     api(`/api/connectors/${slug}/authorize`, { method: "POST" })
       .then(({ url }) => {
         window.open(url);
-        // the user finishes OAuth in the browser; poll a few times to catch it
+        // The sign-in finishes in the browser, often after a password and a
+        // consent screen, so keep looking for two minutes rather than thirty
+        // seconds, and stop as soon as it lands. Read through a ref: the
+        // state this closure saw is the state before the click.
         let tries = 0;
         const timer = setInterval(() => {
+          if (statusRef.current[slug]?.connected || ++tries > 24) return clearInterval(timer);
           void refreshStatus([slug]);
-          if (++tries >= 6 || status[slug]?.connected) clearInterval(timer);
         }, 5000);
       })
       .catch((e) => setError(e.message))
@@ -107,6 +118,11 @@ export function PluginsPanel() {
   };
 
   const disconnect = (slug: string) => {
+    const label = cards?.find((c) => c.slug === slug)?.label ?? slug;
+    // every account behind it goes, and agents stop being able to use it
+    if (!window.confirm(`Disconnect ${label}? Your agents will no longer be able to use it until you connect it again.`)) {
+      return;
+    }
     setBusySlug(slug);
     api(`/api/connectors/${slug}`, { method: "DELETE" })
       .then(() => refreshStatus([slug]))
@@ -128,6 +144,18 @@ export function PluginsPanel() {
       (c) => !search || `${c.label} ${c.slug} ${c.blurb}`.toLowerCase().includes(search.toLowerCase()),
     )
     .sort((a, b) => Number(introPicks.has(b.slug)) - Number(introPicks.has(a.slug)));
+
+  // Status is fetched for the first forty cards up front. A search that
+  // surfaces one further down asks about it too, or an app you connected
+  // would show a Connect button just because it sorted late.
+  useEffect(() => {
+    if (!configured || !search) return;
+    const unknown = visible.map((c) => c.slug).filter((s) => !(s in statusRef.current)).slice(0, 40);
+    if (!unknown.length) return;
+    const timer = setTimeout(() => void refreshStatus(unknown), 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, configured, cards]);
 
   return (
     <div

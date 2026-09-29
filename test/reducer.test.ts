@@ -289,3 +289,12 @@ test("a settings broadcast keeps the new agent defaults, so the card does not va
   assert.equal("kind" in state.config!, false, "the stream's own fields stay out");
   assert.equal("_seq" in state.config!, false);
 });
+
+test("an agent announced before the reply that made it is not listed twice", () => {
+  let state = withState({});
+  const made = bot("n", { threadId: "t-n" });
+  state = reducer(state, { type: "botPatched", bot: made });
+  state = reducer(state, { type: "botAdded", bot: made });
+  assert.deepEqual(state.bots.map((b) => b.id), ["n"]);
+  assert.equal(state.selectedId, "n");
+});

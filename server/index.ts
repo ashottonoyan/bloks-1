@@ -5762,7 +5762,12 @@ const server = createServer(async (req, res) => {
         summary: `Made ${bot.name}${bot.title ? `, ${bot.title}` : ""}`,
         detail: { agent: bot.name },
       });
-      return json(res, 201, { bot: { ...clientBot(store.bot(bot.id))!, messages: store.messagesFor(bot.threadId) } });
+      // Every open window and phone hears about it, not only the one that
+      // asked: an agent hired by another agent, or during onboarding, or
+      // on the phone, otherwise stayed invisible until a reload.
+      const made = { ...clientBot(store.bot(bot.id))!, messages: store.messagesFor(bot.threadId) };
+      broadcast({ kind: "bot", bot: made });
+      return json(res, 201, { bot: made });
     }
     // ── an agent arriving from somewhere else ──
     // Two calls on purpose. The first only reads the file and says what

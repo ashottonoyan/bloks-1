@@ -718,7 +718,9 @@ export function reducer(state: AppState, action: Action): AppState {
       writeSelected(action.bot.id);
       return {
         ...state,
-        bots: [action.bot, ...state.bots],
+        // the server announces a new agent to every window, and that can
+        // arrive before the reply to the request that made it
+        bots: [action.bot, ...state.bots.filter((b) => b.id !== action.bot.id)],
         selectedId: action.bot.id,
         newAgentOpen: false,
         newAgentFirstRun: false,

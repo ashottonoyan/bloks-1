@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/cn";
+import { plural } from "@/lib/plural";
 
 interface JobOffer {
   botId: string;
@@ -131,7 +132,7 @@ export function JobBoard() {
         />
         <div className="mt-2 flex items-center justify-between gap-3">
           <span className="text-[11.5px] text-muted-foreground">
-            {state.bots.filter((b) => !b.hidden).length} agents can see the board
+            {plural(state.bots.filter((b) => !b.hidden).length, "agent")} can see the board
           </span>
           <Button size="sm" disabled={posting || (!title.trim() && !brief.trim())} onClick={post}>
             {posting && <Loader2 size={12} className="animate-spin" />}

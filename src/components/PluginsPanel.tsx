@@ -30,12 +30,19 @@ function ServiceIcon({ card }: { card: ToolkitCard }) {
   // step 0 is the real artwork, 1 the site's favicon, 2 a letter
   const [stage, setStage] = useState(card.logo ? 0 : card.domain ? 1 : 2);
   if (stage === 0 && card.logo) {
-    return <img src={card.logo} alt="" className="size-8 rounded-lg" onError={() => setStage(1)} />;
+    return (
+      <img
+        src={`/api/connectors/icon?src=${encodeURIComponent(card.logo)}`}
+        alt=""
+        className="size-8 rounded-lg"
+        onError={() => setStage(1)}
+      />
+    );
   }
   if (stage === 1 && card.domain) {
     return (
       <img
-        src={`https://www.google.com/s2/favicons?domain=${card.domain}&sz=64`}
+        src={`/api/connectors/icon?domain=${encodeURIComponent(card.domain)}`}
         alt=""
         className="size-8 rounded-lg"
         onError={() => setStage(2)}

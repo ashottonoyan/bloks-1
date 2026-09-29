@@ -3800,6 +3800,28 @@ describe("suggested skills", () => {
     assert.equal((await h.json("/api/config")).skills.propose, false);
   });
 
+  test("the app icon route fetches favicons and known logos, and nothing else", async () => {
+    for (const query of [
+      "src=https%3A%2F%2Fevil.example%2Fx.png",
+      "src=http%3A%2F%2F127.0.0.1%3A22%2F",
+      "src=https%3A%2F%2Fcomposio.dev.evil.example%2Fx.png",
+      "domain=..%2Fetc%2Fpasswd",
+      "domain=localhost",
+      "",
+    ]) {
+      const res = await h.fetch(`/api/connectors/icon?${query}`);
+      assert.equal(res.status, 400, `${query || "no query"} was fetched`);
+    }
+  });
+
+  test("finishing setup succeeds, the first time and every time after", async () => {
+    for (let i = 0; i < 2; i++) {
+      const res = await h.fetch("/api/config", { method: "PUT", body: JSON.stringify({ setupDone: true }) });
+      assert.equal(res.status, 200, `attempt ${i + 1} answered ${res.status}`);
+    }
+    assert.equal((await h.json("/api/config")).setupDone, true);
+  });
+
   test("the switch round-trips", async () => {
     await h.json("/api/config", { method: "PUT", body: JSON.stringify({ skills: { propose: true } }) });
     assert.equal((await h.json("/api/config")).skills.propose, true);

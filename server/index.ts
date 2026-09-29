@@ -304,6 +304,10 @@ const SECURITY_HEADERS = {
   "referrer-policy": "no-referrer",
 };
 
+/** App icons already fetched for the plugin grid, by source URL. Small
+ * images, bounded in count, gone on restart. */
+const iconCache = new Map<string, { type: string; bytes: Buffer }>();
+
 // Before anything spawns a CLI: a Finder-launched app inherits a PATH
 // that has never heard of npm. See server/path.ts.
 widenPath();
@@ -10119,9 +10123,14 @@ const server = createServer(async (req, res) => {
         Object.assign(cfg, loadConfig());
         wroteSomething = true;
       }
-      if (body.setupDone === true && !cfg.setupDoneAt) {
-        saveConfig({ setupDoneAt: Date.now() });
-        Object.assign(cfg, loadConfig());
+      if (body.setupDone === true) {
+        // saying setup is done when it already is, is still a success: the
+        // first answer used to be "nothing to save", a 400 for doing it right
+        if (!cfg.setupDoneAt) {
+          saveConfig({ setupDoneAt: Date.now() });
+          Object.assign(cfg, loadConfig());
+        }
+        wroteSomething = true;
       }
       for (const [section, spec] of Object.entries(FIELDS)) {
         const value = body[section];
@@ -10185,6 +10194,51 @@ const server = createServer(async (req, res) => {
     }
 
     // ── connectors (Composio) ──
+    // App icons, fetched here and handed to the page as our own images.
+    // The page may only load images from itself (see SECURITY_HEADERS),
+    // which blocked every logo and favicon the plugin grid asked for. A
+    // proxy for arbitrary URLs would be a way out of that rule, so this
+    // one takes a bare domain for a favicon, or a logo on a short list of
+    // hosts, and passes back images only.
+    if (method === "GET" && path === "/api/connectors/icon") {
+      const domain = url.searchParams.get("domain") ?? "";
+      const src = url.searchParams.get("src") ?? "";
+      let target: string | null = null;
+      if (/^(?=.{1,253}$)([a-z0-9-]+\.)+[a-z]{2,}$/i.test(domain)) {
+        target = `https://www.google.com/s2/favicons?domain=${domain.toLowerCase()}&sz=64`;
+      } else if (src) {
+        try {
+          const parsed = new URL(src);
+          const host = parsed.hostname.toLowerCase();
+          const allowed =
+            parsed.protocol === "https:" &&
+            (host === "ssl.gstatic.com" || host === "www.google.com" || host === "composio.dev" || host.endsWith(".composio.dev"));
+          if (allowed) target = parsed.toString();
+        } catch {
+          /* not a URL */
+        }
+      }
+      if (!target) return json(res, 400, { error: "not an icon this can fetch" });
+      const cached = iconCache.get(target);
+      if (cached) {
+        res.writeHead(200, { "content-type": cached.type, "cache-control": "max-age=86400", ...SECURITY_HEADERS });
+        return res.end(cached.bytes);
+      }
+      try {
+        const got = await fetch(target, { signal: AbortSignal.timeout(8_000), redirect: "follow" });
+        const type = got.headers.get("content-type") ?? "";
+        const bytes = Buffer.from(await got.arrayBuffer());
+        if (!got.ok || !/^image\/(png|jpeg|gif|webp|x-icon|vnd\.microsoft\.icon|svg\+xml)/.test(type) || bytes.length > 256_000) {
+          return json(res, 404, { error: "no icon" });
+        }
+        if (iconCache.size >= 300) iconCache.delete(iconCache.keys().next().value!);
+        iconCache.set(target, { type, bytes });
+        res.writeHead(200, { "content-type": type, "cache-control": "max-age=86400", ...SECURITY_HEADERS });
+        return res.end(bytes);
+      } catch {
+        return json(res, 404, { error: "no icon" });
+      }
+    }
     if (method === "GET" && path === "/api/connectors/catalog") {
       const { cards, source } = await composio.connectorCatalog(cfg);
       return json(res, 200, { configured: Boolean(cfg.composio?.key), source, cards });

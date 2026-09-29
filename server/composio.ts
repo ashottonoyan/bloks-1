@@ -295,15 +295,16 @@ export interface ConnectorCard {
 
 /** What the plugin grid shows when the REST catalog is unavailable, which
  * is the common case since most people paste a consumer key. Ordered by
- * how likely someone is to want it, not alphabetically. */
+ * how likely someone is to want it, not alphabetically. Google's products
+ * carry their own artwork, since every one of their favicons is the same G. */
 const SHIPPED: ConnectorCard[] = [
   { slug: "slack", label: "Slack", blurb: "Read channels, post updates", domain: "slack.com", logo: null },
   { slug: "github", label: "GitHub", blurb: "Issues, pull requests, code", domain: "github.com", logo: null },
-  { slug: "gmail", label: "Gmail", blurb: "Send and read mail", domain: "gmail.com", logo: null },
-  { slug: "googlecalendar", label: "Google Calendar", blurb: "Check and book time", domain: "calendar.google.com", logo: null },
-  { slug: "googlesheets", label: "Google Sheets", blurb: "Read and update sheets", domain: "sheets.google.com", logo: null },
-  { slug: "googledocs", label: "Google Docs", blurb: "Draft and revise documents", domain: "docs.google.com", logo: null },
-  { slug: "googledrive", label: "Google Drive", blurb: "Find and organise files", domain: "drive.google.com", logo: null },
+  { slug: "gmail", label: "Gmail", blurb: "Send and read mail", domain: "gmail.com", logo: "https://ssl.gstatic.com/images/branding/product/1x/gmail_2020q4_32dp.png" },
+  { slug: "googlecalendar", label: "Google Calendar", blurb: "Check and book time", domain: "calendar.google.com", logo: "https://ssl.gstatic.com/images/branding/product/1x/calendar_2020q4_32dp.png" },
+  { slug: "googlesheets", label: "Google Sheets", blurb: "Read and update sheets", domain: "sheets.google.com", logo: "https://ssl.gstatic.com/images/branding/product/1x/sheets_2020q4_32dp.png" },
+  { slug: "googledocs", label: "Google Docs", blurb: "Draft and revise documents", domain: "docs.google.com", logo: "https://ssl.gstatic.com/images/branding/product/1x/docs_2020q4_32dp.png" },
+  { slug: "googledrive", label: "Google Drive", blurb: "Find and organise files", domain: "drive.google.com", logo: "https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_32dp.png" },
   { slug: "outlook", label: "Outlook", blurb: "Mail and calendar, Microsoft side", domain: "outlook.com", logo: null },
   { slug: "microsoft_teams", label: "Microsoft Teams", blurb: "Chats, channels, meetings", domain: "teams.microsoft.com", logo: null },
   { slug: "excel", label: "Excel", blurb: "Read and update workbooks", domain: "microsoft.com", logo: null },

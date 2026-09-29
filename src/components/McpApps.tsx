@@ -19,6 +19,7 @@ import { useMcpServers, type McpServerRow } from "./McpServers";
 import { useTheme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { plural } from "@/lib/plural";
 
 interface McpApp {
   uri: string;
@@ -120,7 +121,7 @@ function ServerApps({
             {apps === null
               ? server.target
               : apps.length === 0
-                ? `${tools} tools, no interface`
+                ? `${plural(tools, "tool")}, no interface`
                 : `${apps.length} app${apps.length === 1 ? "" : "s"}, ${tools} tools`}
           </span>
         </span>

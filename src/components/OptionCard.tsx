@@ -4,6 +4,7 @@ import { useStore, type Message, type TeamPlan } from "@/state/store";
 import { BlokAvatar } from "@/components/Avatar";
 import { BLOK_COLOR_NAMES, shapeForBot, type BlokColor } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
+import { plural } from "@/lib/plural";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
@@ -185,7 +186,7 @@ function TeamProposal({
           {hired ? "Team hired" : "Proposed team"}
         </div>
         <div className="mt-1 text-[14.5px] font-semibold text-foreground">
-          {leadName} wants {plan.members.length} people for “{plan.room}”
+          {leadName} wants {plural(plan.members.length, "person", "people")} for “{plan.room}”
         </div>
         <div className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
           They run on the cheaper model and do the legwork. {leadName} reviews everything and reports

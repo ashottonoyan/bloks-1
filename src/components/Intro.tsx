@@ -362,12 +362,19 @@ function PluginsStage({ onDone }: { onDone: (connected: string[]) => void }) {
 function ToolIcon({ label, domain, icon }: { label: string; domain: string; icon?: string }) {
   const [stage, setStage] = useState(icon ? 0 : 1);
   if (stage === 0 && icon) {
-    return <img src={icon} alt="" className="size-7 rounded-lg" onError={() => setStage(1)} />;
+    return (
+      <img
+        src={`/api/connectors/icon?src=${encodeURIComponent(icon)}`}
+        alt=""
+        className="size-7 rounded-lg"
+        onError={() => setStage(1)}
+      />
+    );
   }
   if (stage === 1) {
     return (
       <img
-        src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+        src={`/api/connectors/icon?domain=${encodeURIComponent(domain)}`}
         alt=""
         className="size-7 rounded-lg"
         onError={() => setStage(2)}

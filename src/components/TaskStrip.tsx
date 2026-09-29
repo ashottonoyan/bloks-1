@@ -23,6 +23,7 @@ import { useRef, useState } from "react";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { cn } from "@/lib/cn";
+import { plural } from "@/lib/plural";
 
 export type TaskState = "working" | "needs-you" | "idle";
 
@@ -225,7 +226,7 @@ export function TaskStrip({
               return label ? (
                 <span
                   className={cn("shrink-0 text-[10.5px] tabular-nums", active ? "opacity-70" : "text-muted-foreground/70")}
-                  title={`${task.usage!.input.toLocaleString()} in · ${task.usage!.output.toLocaleString()} out · ${task.usage!.turns} turns`}
+                  title={`${task.usage!.input.toLocaleString()} in · ${task.usage!.output.toLocaleString()} out · ${plural(task.usage!.turns, "turn")}`}
                 >
                   {label}
                 </span>

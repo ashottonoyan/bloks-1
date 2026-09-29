@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/cn";
 import { useEscape } from "@/lib/useEscape";
+import { plural } from "@/lib/plural";
 
 interface BriefPart {
   botId: string | null;
@@ -293,7 +294,7 @@ export function BriefPanel() {
                   ))}
                   {brief.spend.turns > 0 && (
                     <span className="rounded-full bg-muted px-2.5 py-1">
-                      {brief.spend.turns} turns
+                      {plural(brief.spend.turns, "turn")}
                       {brief.spend.costKnown && brief.spend.cost > 0 ? `, about $${brief.spend.cost.toFixed(2)}` : ""}
                     </span>
                   )}

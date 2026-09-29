@@ -31,6 +31,7 @@ import { type Routine, type RoutineRun } from "./RoutinesSection";
 import { RoutinesDialog } from "./RoutinesDialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { useEscape } from "@/lib/useEscape";
 import { JobBoard } from "./JobBoard";
 import { Workflows } from "./Workflows";
 import { cn } from "@/lib/cn";
@@ -84,6 +85,9 @@ function addMonths(d: Date, n: number): Date {
 
 export function AutomationsPanel({ onClose }: { onClose: () => void }) {
   const { state } = useStore();
+  // a page like Settings, and closed the same way; the routine dialog on
+  // top of it registers after this and so takes Escape first
+  useEscape(onClose);
   const [tab, setTab] = useState<"schedules" | "watchers" | "workflows" | "webhooks" | "jobs">("schedules");
   const [routines, setRoutines] = useState<Routine[] | null>(null);
   const [mode, setMode] = useState<"day" | "week" | "month">("week");

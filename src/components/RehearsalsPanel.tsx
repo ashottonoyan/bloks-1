@@ -16,6 +16,7 @@ import { ChangesCard } from "./ChangesCard";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { useEscape } from "@/lib/useEscape";
+import { plural } from "@/lib/plural";
 
 interface Attempt {
   id: string;
@@ -120,7 +121,7 @@ export function RehearsalsPanel() {
                       </div>
                       {group.length > 1 && (
                         <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                          {group.length} attempts
+                          {plural(group.length, "attempt")}
                         </span>
                       )}
                     </div>

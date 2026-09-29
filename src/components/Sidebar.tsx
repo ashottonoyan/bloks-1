@@ -44,6 +44,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { plural } from "@/lib/plural";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
@@ -482,7 +483,7 @@ function RoomListItem({
             ? `${working.map((m) => m.name).join(", ")} working…`
             : last
               ? previewLine(last)
-              : `${members.length} agents`}
+              : plural(members.length, "agent")}
         </div>
       </div>
     </button>
@@ -610,17 +611,15 @@ export function Sidebar() {
     localStorage.setItem("bloks-folded-sections", JSON.stringify(next));
   };
 
-  // ⌘N new agent, ⌘K focus search, the two things you do most
+  // ⌘N for a new agent. ⌘K is the command palette's (CommandPalette.tsx),
+  // which searches everything this box does and more; both answering it
+  // meant two things grabbing focus at once.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey && !e.ctrlKey) return;
       if (e.key === "n") {
         e.preventDefault();
         dispatch({ type: "toggleNewAgent", open: true });
-      } else if (e.key === "k") {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
       }
     };
     window.addEventListener("keydown", onKey);

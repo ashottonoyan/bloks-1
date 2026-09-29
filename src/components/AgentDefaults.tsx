@@ -21,11 +21,13 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import { Segmented } from "@/components/ui/segmented";
 import { SettingRow, SettingsGroup } from "./SettingsLayout";
+import { confirmWidening } from "./ApprovalsChooser";
 
 const APPROVALS = [
   [undefined, "Ask"],
   ["edits", "Accept edits"],
   ["auto", "Auto"],
+  ["full", "Full access"],
 ] as const;
 
 const EFFORTS = [
@@ -79,12 +81,9 @@ export function AgentDefaults() {
    * way around the check. Narrowing never asks. */
   const chooseApprovals = async (next: Defaults["approvals"]) => {
     setRefused(false);
-    if (next === "auto" && saved.approvals !== "auto" && window.bloks?.authConfirm) {
-      const answer = await window.bloks.authConfirm("let new agents act without asking");
-      if (answer === "denied" || answer === "cancelled") {
-        setRefused(true);
-        return;
-      }
+    if (!(await confirmWidening(saved.approvals ?? "ask", next ?? "ask", "new agents"))) {
+      setRefused(true);
+      return;
     }
     save({ approvals: next });
   };

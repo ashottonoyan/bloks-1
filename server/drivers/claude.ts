@@ -165,6 +165,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const turnId = newId();
       const resume = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
 
+      // Nothing asks when the engine is set to bypass, or when this agent is
+      // in full access; a shared room is never either.
+      const bypass = !turn.shared && (config.permissionMode === "bypassPermissions" || Boolean(turn.fullAccess));
       const argv = [
         "-p",
         "--output-format", "stream-json",
@@ -176,7 +179,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         "--permission-mode",
         turn.shared
           ? "acceptEdits"
-          : config.permissionMode === "auto" ? "acceptEdits" : config.permissionMode,
+          : bypass
+            ? "bypassPermissions"
+            : config.permissionMode === "auto" ? "acceptEdits" : config.permissionMode,
       ];
       // Resuming continues the CLI's own session; otherwise name the new
       // one ourselves so the id exists before its first event arrives.
@@ -289,7 +294,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // bypassPermissions means nothing would ever ask, so there is nothing
       // to broker. Every other mode gets the bridge.
       let broker: AskBroker | undefined;
-      if (config.permissionMode !== "bypassPermissions" || turn.shared) {
+      if (!bypass) {
         const socketPath = brokerSocket(threadId);
         broker = createAskBroker({
           socketPath,

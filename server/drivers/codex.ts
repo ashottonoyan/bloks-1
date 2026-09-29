@@ -365,9 +365,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           });
         logDecision("opened");
 
-        // fullAuto waives approvals but never questions: a question has no
-        // safe automatic answer, only a less useful one.
-        if (config.fullAuto && !isQuestion) {
+        // fullAuto, or an agent in full access, waives approvals but never
+        // questions: a question has no safe automatic answer, only a less
+        // useful one.
+        if ((config.fullAuto || turn.fullAccess) && !isQuestion) {
           logDecision("resolved", "allow", "auto");
           return rpc.reply(msg.id, permissionReply(true, "auto"));
         }
@@ -560,10 +561,18 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
           let codexThread: string | null = null;
           let reportedModel: string | null = null;
+          // fullAuto is the engine set that way; fullAccess is this agent.
+          // Either takes the sandbox off and stops Codex asking. Stated on
+          // resume too, so switching an agent's mode takes on its next turn.
+          const full = config.fullAuto || Boolean(turn.fullAccess);
+          const guard = {
+            sandbox: full ? "danger-full-access" : "workspace-write",
+            approvalPolicy: full ? "never" : "on-request",
+          };
 
           if (cursor) {
             try {
-              const resumed = await rpc.request("thread/resume", { threadId: cursor });
+              const resumed = await rpc.request("thread/resume", { threadId: cursor, ...guard });
               codexThread = resumed?.thread?.id ?? cursor;
             } catch {
               /* forgotten or unsupported; a fresh thread below */
@@ -574,10 +583,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             const startParams: Record<string, unknown> = {
               cwd: turn.cwd ?? homedir(),
               model: turn.model || null,
-              // fullAuto is the user having said so explicitly; the default
-              // keeps the agent inside its workspace and asking.
-              sandbox: config.fullAuto ? "danger-full-access" : "workspace-write",
-              approvalPolicy: config.fullAuto ? "never" : "on-request",
+              // full access is the user having said so explicitly; the
+              // default keeps the agent inside its workspace and asking.
+              ...guard,
               ephemeral: false,
             };
             if (turn.effort) startParams.reasoningEffort = turn.effort;

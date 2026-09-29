@@ -19,6 +19,7 @@ import { cn } from "@/lib/cn";
 import { recommendedFor, WORK_TYPES } from "@/lib/recommend";
 import { AGENT_TEMPLATES } from "@/lib/agentTemplates";
 import { ThisComputer, thisComputer } from "@/lib/thisComputer";
+import { ApprovalsChooser, confirmWidening, type ApprovalMode } from "./ApprovalsChooser";
 
 type InstanceRow = {
   instanceId: string;
@@ -149,6 +150,28 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [work, setWork] = useState<string[]>([]);
   const [hiring, setHiring] = useState<string | null>(null);
   const [hired, setHired] = useState<string[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalMode>("ask");
+  const [approvalsNote, setApprovalsNote] = useState<string | null>(null);
+  const [savingApprovals, setSavingApprovals] = useState(false);
+
+  /** Where every agent starts, the one already here included. */
+  const chooseApprovals = async () => {
+    setApprovalsNote(null);
+    if (!(await confirmWidening("ask", approvals, "your agents"))) {
+      setApprovalsNote("Not confirmed. Pick again, or continue with Ask first.");
+      setApprovals("ask");
+      return;
+    }
+    setSavingApprovals(true);
+    await fetch("/api/approvals", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: approvals, applyToAll: true }),
+    }).catch(() => {});
+    setSavingApprovals(false);
+    track("setup_approvals", { mode: approvals });
+    setStep(3);
+  };
 
   useEffect(() => {
     void fetch("/api/config")
@@ -196,7 +219,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       const timer = setInterval(checkEngines, 5000);
       return () => clearInterval(timer);
     }
-    if (step === 3 && isElectron) {
+    if (step === 4 && isElectron) {
       const poll = () => window.bloks?.permStatus?.().then(setPerms).catch(() => {});
       poll();
       const timer = setInterval(poll, 2000);
@@ -464,6 +487,28 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         )}
 
         {step === 2 && (
+          // Asked once, up front, because the default decides how the
+          // first hour feels: a card for everything, or agents that get on
+          // with it. Every agent made from here starts on the choice.
+          <div className="flex flex-col">
+            <h1 className="text-[17px] font-semibold tracking-tight text-foreground">
+              How much should your agents ask?
+            </h1>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              You can change this any time in Settings, and for any one agent in its own
+              settings.
+            </p>
+            <div className="mt-4">
+              <ApprovalsChooser value={approvals} onChange={setApprovals} compact />
+            </div>
+            {approvalsNote && <div className="mt-2 text-[12px] text-warning">{approvalsNote}</div>}
+            <Button size="lg" className="mt-5 w-full" disabled={savingApprovals} onClick={() => void chooseApprovals()}>
+              Continue
+            </Button>
+          </div>
+        )}
+
+        {step === 3 && (
           <div className="flex flex-col">
             <h1 className="text-[17px] font-semibold tracking-tight text-foreground">
               Start with one of these
@@ -508,13 +553,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 );
               })}
             </div>
-            <Button size="lg" className="mt-5 w-full" onClick={() => (isElectron ? setStep(3) : finish())}>
+            <Button size="lg" className="mt-5 w-full" onClick={() => (isElectron ? setStep(4) : finish())}>
               {hired.length ? "Continue" : "Skip for now"}
             </Button>
           </div>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <div className="flex flex-col">
             <h1 className="text-[17px] font-semibold tracking-tight text-foreground">Permissions</h1>
             <p className="mt-1 text-[13px] text-muted-foreground">

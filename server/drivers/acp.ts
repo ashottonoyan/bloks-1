@@ -480,7 +480,7 @@ export function acpDriver(spec: AcpSpec): ProviderDriver<AcpConfig> {
             if (turn.model && catalog?.options.some((m) => m.id === turn.model)) {
               await rpc.request("session/set_model", { sessionId, modelId: turn.model }).catch(() => {});
             }
-            if (config.fullAuto) {
+            if (config.fullAuto || (turn.fullAccess && !turn.shared)) {
               await rpc.request("session/set_mode", { sessionId, modeId: "yolo" }).catch(() => {});
             }
 

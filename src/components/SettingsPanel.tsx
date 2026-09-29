@@ -30,6 +30,7 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { cn } from "@/lib/cn";
 import { thisComputer } from "@/lib/thisComputer";
 import { EngineSuggestionCard, useEngineReport } from "./EngineReport";
+import { confirmWidening } from "./ApprovalsChooser";
 
 function Field({
   label,
@@ -647,6 +648,7 @@ function ApprovalsCard({ bot }: { bot: Bot }) {
     { id: "ask" as const, label: "Ask", hint: "Every consequential action cards" },
     { id: "edits" as const, label: "Accept edits", hint: "File changes go ahead; the rest asks" },
     { id: "auto" as const, label: "Auto", hint: "Everything goes ahead; deny rules still refuse" },
+    { id: "full" as const, label: "Full access", hint: "No prompts and no sandbox; rules can't catch what never asks" },
   ];
 
   /**
@@ -658,16 +660,11 @@ function ApprovalsCard({ bot }: { bot: Bot }) {
    * proves who is present when it can, and stays out of the way when it
    * cannot.
    */
-  const choose = async (next: "ask" | "edits" | "auto") => {
+  const choose = async (next: "ask" | "edits" | "auto" | "full") => {
     setRefused(false);
-    if (next === "auto" && mode !== "auto" && window.bloks?.authConfirm) {
-      const answer = await window.bloks.authConfirm(
-        `let ${bot.name} act without asking`,
-      );
-      if (answer === "denied" || answer === "cancelled") {
-        setRefused(true);
-        return;
-      }
+    if (!(await confirmWidening(mode, next, bot.name))) {
+      setRefused(true);
+      return;
     }
     dispatch({ type: "updateBot", botId: bot.id, patch: { approvals: next } });
   };

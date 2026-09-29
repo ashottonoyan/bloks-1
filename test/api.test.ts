@@ -1248,6 +1248,83 @@ describe("defaults for new agents", () => {
     await h.fetch(`/api/bots/${plain.id}?forget=1`, { method: "DELETE" });
   });
 
+  test("one approvals choice for the workspace: new agents start on it, and every agent can be moved to it", async () => {
+    const before = await h.json("/api/approvals");
+    assert.equal(before.mode, "ask");
+    const { bot: one } = await h.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Before" }) });
+
+    // the default alone leaves agents already here as they were
+    let res = await h.json("/api/approvals", { method: "PUT", body: JSON.stringify({ mode: "edits" }) });
+    assert.deepEqual(res, { mode: "edits", changed: 0 });
+    const kept = (await h.json("/api/bots")).bots.find((b: any) => b.id === one.id);
+    assert.equal(kept.approvals ?? "ask", "ask");
+    const { bot: two } = await h.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "After" }) });
+    assert.equal(two.approvals, "edits", "a new agent starts on the workspace's choice");
+
+    // and on request it moves everyone
+    res = await h.json("/api/approvals", { method: "PUT", body: JSON.stringify({ mode: "full", applyToAll: true }) });
+    assert.equal(res.mode, "full");
+    assert.ok(res.changed >= 2);
+    const all = (await h.json("/api/bots")).bots.filter((b: any) => !b.hidden && !b.archivedAt);
+    assert.ok(all.every((b: any) => b.approvals === "full"));
+    assert.equal((await h.json("/api/config")).agentDefaults.approvals, "full");
+    assert.equal((await h.fetch("/api/approvals", { method: "PUT", body: JSON.stringify({ mode: "yolo" }) })).status, 400);
+
+    // back to asking, for the tests after this one
+    await h.json("/api/approvals", { method: "PUT", body: JSON.stringify({ mode: "ask", applyToAll: true }) });
+    assert.equal((await h.json("/api/config")).agentDefaults.approvals, undefined);
+    await h.fetch(`/api/bots/${one.id}?forget=1`, { method: "DELETE" });
+    await h.fetch(`/api/bots/${two.id}?forget=1`, { method: "DELETE" });
+  });
+
+  test("full access takes Claude Code's own prompts off, and every other mode keeps them", async (t) => {
+    const home = mkdtempSync(join(tmpdir(), "bloks-full-"));
+    const seen = join(home, "argv.json");
+    const cli = join(home, "fake-claude.mjs");
+    writeFileSync(
+      cli,
+      `#!${process.execPath}
+import { appendFileSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("9.9.9 (Claude Code)"); process.exit(0); }
+if (args[0] === "auth") { console.log(JSON.stringify({ loggedIn: true })); process.exit(0); }
+appendFileSync(${JSON.stringify(seen)}, JSON.stringify(args) + "\\n");
+process.stdin.resume();
+process.stdin.on("end", () => console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false })));
+`,
+      { mode: 0o755 },
+    );
+    mkdirSync(join(home, ".bloks"), { recursive: true });
+    writeFileSync(join(home, ".bloks", "config.json"), JSON.stringify({ instances: { claude: { driver: "claudeAgent", config: { cli } } } }));
+    const h2 = await startHarness({ HOME: home });
+    t.after(async () => {
+      await h2.stop();
+      rmSync(home, { recursive: true, force: true });
+    });
+    const { bot } = await h2.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Runner" }) });
+    const turn = async (approvals: string) => {
+      await h2.fetch(`/api/bots/${bot.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ approvals, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } }),
+      });
+      const before = existsSync(seen) ? readFileSync(seen, "utf8").trim().split("\n").length : 0;
+      await h2.fetch(`/api/bots/${bot.id}/messages`, { method: "POST", body: JSON.stringify({ text: "go" }) });
+      for (let i = 0; i < 200; i++) {
+        const lines = existsSync(seen) ? readFileSync(seen, "utf8").trim().split("\n") : [];
+        const { bots } = await h2.json("/api/bots");
+        if (lines.length > before && !bots.find((b: any) => b.id === bot.id).busy) return JSON.parse(lines[lines.length - 1]);
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      throw new Error("the turn never ran");
+    };
+    const full = await turn("full");
+    assert.equal(full[full.indexOf("--permission-mode") + 1], "bypassPermissions");
+    assert.ok(!full.includes("--permission-prompt-tool"), "nothing to broker when nothing asks");
+    const asking = await turn("ask");
+    assert.equal(asking[asking.indexOf("--permission-mode") + 1], "acceptEdits");
+    assert.ok(asking.includes("--permission-prompt-tool"), "every other mode keeps the approval bridge");
+  });
+
   test("an agent never passes on or takes more approvals than it has", async (t) => {
     // A stand-in for Claude Code that uses the turn's real credential the
     // way the CLI does, so the checks under test are the server's own.

@@ -184,6 +184,10 @@ export interface SendTurnInput {
    * with that (ownerToolsSafe in server/index.ts).
    */
   shared?: { tools: "conversation" | "desk" };
+  /** The agent is in full access: the engine's own guards come off too
+   * (no permission prompts, no sandbox), so nothing asks and nothing is
+   * routed through the approval gate. Never set on a shared turn. */
+  fullAccess?: boolean;
   cwd?: string;
   /** Folders the agent may edit without asking, beyond its cwd. The
    * harness grants its own workspace (memory lives there) so an agent

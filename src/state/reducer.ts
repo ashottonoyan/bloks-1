@@ -209,7 +209,7 @@ export interface Bot {
   /** How much this agent may do without asking: ask (default), edits
    * (file changes wave through), auto (everything does). Deny rules
    * outrank every mode. */
-  approvals?: "ask" | "edits" | "auto";
+  approvals?: "ask" | "edits" | "auto" | "full";
   hidden?: boolean;
   messages: Message[];
 }
@@ -244,7 +244,7 @@ export interface ConfigStatus {
 export interface AgentDefaults {
   cwd?: string;
   /** Ask when unset. An agent hiring another passes on no more than its own. */
-  approvals?: "edits" | "auto";
+  approvals?: "edits" | "auto" | "full";
   modelSelection?: ModelSelection;
   effort?: "low" | "medium" | "high";
 }

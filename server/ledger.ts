@@ -37,6 +37,7 @@ export type LedgerKind =
   | "genesis"
   | "approval"
   | "agent.created"
+  | "approvals.changed"
   | "agent.imported"
   | "agent.exported"
   | "agent.archived"

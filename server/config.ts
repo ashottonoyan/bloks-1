@@ -149,7 +149,7 @@ export interface AppConfig {
    * An agent hiring an agent never passes on more approvals than it has. */
   agentDefaults?: {
     cwd?: string;
-    approvals?: "ask" | "edits" | "auto";
+    approvals?: "ask" | "edits" | "auto" | "full";
     modelSelection?: { instanceId: string; model: string };
     effort?: "low" | "medium" | "high";
   };

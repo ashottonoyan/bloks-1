@@ -65,6 +65,11 @@ describe("what an agent can do", () => {
     assert.equal(allows(ME, "PATCH", `/api/bots/${SOMEONE_ELSE}`).ok, false);
   });
 
+  test("how much every agent may do without asking is never an agent's to set", () => {
+    assert.equal(allows(ME, "PUT", "/api/approvals").ok, false);
+    assert.equal(allows(ME, "GET", "/api/approvals").ok, false);
+  });
+
   test("renaming its own conversations, and nobody else's", () => {
     assert.equal(allows(ME, "PATCH", `/api/bots/${ME}/tasks/lane-1`).ok, true);
     assert.equal(allows(ME, "PATCH", `/api/bots/${SOMEONE_ELSE}/tasks/lane-1`).ok, false);

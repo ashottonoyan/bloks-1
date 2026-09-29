@@ -293,7 +293,7 @@ export interface BotRecord {
    * Deny rules outrank every mode: a mode is a wider allow, never a
    * way past something the user forbade.
    */
-  approvals?: "ask" | "edits" | "auto";
+  approvals?: "ask" | "edits" | "auto" | "full";
   /**
    * Retired rather than destroyed. Set instead of the record being
    * deleted, so an agent stops appearing and stops working without

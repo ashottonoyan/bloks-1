@@ -125,6 +125,8 @@ export const RULES: Rule[] = [
  */
 export const NEVER = [
   "/api/config",
+  // how much every agent may do without asking is the person's alone
+  "/api/approvals",
   "/api/providers",
   "/api/custom-endpoints",
   "/api/instances",

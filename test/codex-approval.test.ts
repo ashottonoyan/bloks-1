@@ -63,8 +63,8 @@ async function setup(t: TestContext, fullAuto = false) {
     t.mock.restoreAll();
     syncBuiltinESMExports();
   });
-  async function start(threadId = "task-a") {
-    await instance.adapter.sendTurn({ threadId, text: "Test Drive" });
+  async function start(threadId = "task-a", extra: Record<string, unknown> = {}) {
+    await instance.adapter.sendTurn({ threadId, text: "Test Drive", ...extra });
     await setImmediate();
     return peers.at(-1)!;
   }
@@ -215,4 +215,26 @@ test("command, edit and question replies retain their own protocol formats", asy
   const ask = h.events.filter((e) => e.type === "request.opened").at(-1)!;
   await h.instance.adapter.respondToRequest("task-a", ask.requestId!, { behavior: "answer", message: "Friday" });
   assert.deepEqual(peer.reply("question").result, { answers: { date: { answers: ["Friday"] } } });
+});
+
+test("an agent in full access runs Codex unsandboxed and never asking", async (t) => {
+  const h = await setup(t);
+  const peer = await h.start("task-full", { fullAccess: true });
+  await setImmediate();
+  const thread = peer.frames.find((f) => f.method === "thread/start");
+  assert.equal(thread.params.sandbox, "danger-full-access");
+  assert.equal(thread.params.approvalPolicy, "never");
+  // anything that still asks is accepted, the same as an engine set to full auto
+  peer.send(elicitation(0));
+  assert.deepEqual(peer.reply(0).result, { action: "accept", content: {}, _meta: null });
+  assert.ok(!h.events.some((e) => e.type === "request.opened"));
+});
+
+test("without full access Codex keeps its sandbox, and a resumed thread is told which it is", async (t) => {
+  const h = await setup(t);
+  const peer = await h.start("task-kept", { resumeCursor: "codex-thread" });
+  await setImmediate();
+  const resume = peer.frames.find((f) => f.method === "thread/resume");
+  assert.equal(resume.params.sandbox, "workspace-write");
+  assert.equal(resume.params.approvalPolicy, "on-request");
 });

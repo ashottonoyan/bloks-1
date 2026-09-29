@@ -325,7 +325,7 @@ async function defaultSelection() {
 
 type Approvals = NonNullable<BotRecord["approvals"]>;
 // From least to most an agent may do without asking.
-const APPROVALS: Approvals[] = ["ask", "edits", "auto"];
+const APPROVALS: Approvals[] = ["ask", "edits", "auto", "full"];
 const lesserApprovals = (a: Approvals, b: Approvals) => (APPROVALS.indexOf(a) <= APPROVALS.indexOf(b) ? a : b);
 
 // The settings a new agent is born with, applied before its first turn
@@ -1376,7 +1376,9 @@ bus.subscribe((event: RuntimeEvent) => {
         // refused by here, so a mode can only widen what is allowed,
         // never reopen what a rule shut. "auto" waves everything
         // through; "edits" waves through the file-shaped tools and
-        // cards the rest.
+        // cards the rest. "full" rarely gets here at all, because its
+        // engines are told not to ask; one that asks anyway is waved
+        // through like auto.
         const mode = bot.approvals ?? "ask";
         // File-shaped tools only, and named tightly: a bare "create"
         // would also match a connector's create_pull_request, which is
@@ -1384,7 +1386,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const editish = /edit|^write|_write|patch|str_replace|save_file|create_file|mkdir/i.test(
           event.tool ?? "",
         );
-        if (!byMember && (mode === "auto" || (mode === "edits" && editish))) {
+        if (!byMember && (mode === "auto" || mode === "full" || (mode === "edits" && editish))) {
           const instance = laneInstance(bot, event.threadId);
           void instance?.adapter
             .respondToRequest(event.threadId, event.requestId, { behavior: "allow" })
@@ -1397,7 +1399,7 @@ bus.subscribe((event: RuntimeEvent) => {
               summary: event.summary || event.tool || "an action",
               detail: {
                 answer: "allow",
-                decidedBy: mode === "auto" ? "auto mode" : "edits mode",
+                decidedBy: mode === "full" ? "full access" : mode === "auto" ? "auto mode" : "edits mode",
                 agent: bot.name,
               },
             }),
@@ -2598,6 +2600,9 @@ async function startTurn(
         // Not in a shared room, where those notes are the owner's.
         ...(onCloud || sharing ? {} : { extraDirs: [workspace.ensureWorkspace(bot.id)] }),
         ...(sharing ? { shared: { tools: sharing.tools } } : {}),
+        // full access takes the engine's own guards off too; never in a
+        // shared room, where the approvals protect other people
+        ...(bot.approvals === "full" && !sharing ? { fullAccess: true } : {}),
         text: turnText,
         model: selection.model,
         effort: bot.effort,
@@ -5928,7 +5933,7 @@ const server = createServer(async (req, res) => {
       }
       if (body.approvals !== undefined) {
         if (!APPROVALS.includes(body.approvals as Approvals)) {
-          return json(res, 400, { error: "approvals is ask, edits or auto" });
+          return json(res, 400, { error: "approvals is ask, edits, auto or full" });
         }
         // Lowering is always allowed. Raising is the person's call, for
         // the same reason as the browser below: PATCH /api/bots/:me is on
@@ -9858,6 +9863,43 @@ const server = createServer(async (req, res) => {
     }
 
     // ── stored settings: written here, never read back out ──
+    // ── how much agents ask, for the whole workspace ──
+    // One choice, made once: it is the start for every new agent, and on
+    // request it becomes every existing agent's mode too. Each agent can
+    // still be set differently afterwards in its own settings.
+    if (method === "GET" && path === "/api/approvals") {
+      const counts: Record<string, number> = { ask: 0, edits: 0, auto: 0, full: 0 };
+      for (const b of store.bots) if (!b.hidden && !b.archivedAt) counts[b.approvals ?? "ask"]++;
+      return json(res, 200, { mode: cfg.agentDefaults?.approvals ?? "ask", agents: counts });
+    }
+    if ((method === "PUT" || method === "POST") && path === "/api/approvals") {
+      const body = await readBody(req);
+      const mode = body.mode as Approvals;
+      if (!APPROVALS.includes(mode)) return json(res, 400, { error: "mode is ask, edits, auto or full" });
+      const { approvals: _old, ...rest } = cfg.agentDefaults ?? {};
+      saveConfig({ agentDefaults: mode === "ask" ? rest : { ...rest, approvals: mode } });
+      Object.assign(cfg, loadConfig());
+      let changed = 0;
+      if (body.applyToAll === true) {
+        for (const b of store.bots) {
+          if (b.hidden || b.archivedAt || (b.approvals ?? "ask") === mode) continue;
+          store.patchBot(b.id, { approvals: mode });
+          broadcast({ kind: "bot", bot: clientBot(store.bot(b.id)) });
+          changed++;
+        }
+      }
+      record({
+        at: Date.now(),
+        kind: "approvals.changed",
+        actor: "you",
+        summary:
+          `New agents now start on ${mode}` + (changed ? `, and ${changed} agent${changed === 1 ? "" : "s"} moved to it` : ""),
+        detail: { mode, changed },
+      });
+      const status = configStatus();
+      broadcast({ kind: "config", ...status });
+      return json(res, 200, { mode, changed });
+    }
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configStatus());
     }
@@ -9933,7 +9975,7 @@ const server = createServer(async (req, res) => {
         }
         if (asked.approvals !== undefined) {
           if (!APPROVALS.includes(asked.approvals as Approvals)) {
-            return json(res, 400, { error: "approvals is ask, edits or auto" });
+            return json(res, 400, { error: "approvals is ask, edits, auto or full" });
           }
           next.approvals = asked.approvals as Approvals;
         }

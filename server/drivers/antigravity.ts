@@ -156,7 +156,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         // would pin the composer forever
         "--print-timeout", "10m",
       ];
-      if (config.fullAuto) argv.push("--dangerously-skip-permissions");
+      if (config.fullAuto || (turn.fullAccess && !turn.shared)) argv.push("--dangerously-skip-permissions");
       else argv.push("--mode", "accept-edits");
       if (turn.model) argv.push("--model", turn.model);
       if (resume) argv.push("--conversation", resume);

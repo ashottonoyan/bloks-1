@@ -39,6 +39,7 @@ const LABEL: Record<string, string> = {
   genesis: "Record started",
   approval: "Approval",
   "agent.created": "Agent made",
+  "approvals.changed": "Approvals changed",
   "agent.imported": "Agent brought in",
   "agent.exported": "Agent exported",
   "agent.archived": "Agent archived",

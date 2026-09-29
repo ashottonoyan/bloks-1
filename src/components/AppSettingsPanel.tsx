@@ -52,6 +52,7 @@ import Smartphone from "lucide-react/dist/esm/icons/smartphone.mjs";
 import UserIcon from "lucide-react/dist/esm/icons/user.mjs";
 import UserPlus from "lucide-react/dist/esm/icons/user-plus.mjs";
 import { useEscape } from "@/lib/useEscape";
+import { APPROVAL_MODES, ApprovalsChooser, confirmWidening, useWorkspaceApprovals, type ApprovalMode } from "./ApprovalsChooser";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: React.ReactNode }> = [
   { value: "light", label: "Light", icon: <Sun size={14} /> },
@@ -514,8 +515,8 @@ export const SETTINGS_PAGES: Array<{ group: string; pages: SettingsPage[] }> = [
         id: "rules",
         label: "Rules and approvals",
         icon: ShieldCheck,
-        description: "What agents may never do, and what they may do without asking.",
-        keywords: "deny allow permissions safety approval gate",
+        description: "How much agents do before asking you, and what they may never do.",
+        keywords: "deny allow permissions safety approval gate full access auto ask conservative",
       },
       {
         id: "voices",
@@ -627,6 +628,65 @@ function GeneralPage() {
   );
 }
 
+/**
+ * The one approvals choice for the workspace. Picking a mode makes it
+ * where every new agent starts, at once; agents already working keep
+ * theirs until you move them, because a mode changing under an agent
+ * mid-task is not something to do by accident.
+ */
+function WorkspaceApprovals() {
+  const { state, save } = useWorkspaceApprovals();
+  const [note, setNote] = useState<string | null>(null);
+  if (!state) return null;
+  const mode = state.mode;
+  const total = Object.values(state.agents).reduce((a, b) => a + b, 0);
+  const elsewhere = total - (state.agents[mode] ?? 0);
+  const label = APPROVAL_MODES.find((m) => m.id === mode)?.label ?? mode;
+
+  const choose = async (next: ApprovalMode) => {
+    setNote(null);
+    if (next === mode) return;
+    if (!(await confirmWidening(mode, next, "new agents"))) {
+      setNote("Not confirmed, so nothing changed.");
+      return;
+    }
+    await save(next, false);
+  };
+  const applyToAll = async () => {
+    setNote(null);
+    if (!(await confirmWidening("ask", mode, "every agent"))) {
+      setNote("Not confirmed, so nothing changed.");
+      return;
+    }
+    await save(mode, true);
+    setNote(`Every agent is on ${label} now.`);
+  };
+
+  return (
+    <SettingsGroup title="How much agents ask">
+      <div className="p-4">
+        <ApprovalsChooser value={mode} onChange={(next) => void choose(next)} />
+        <div className="mt-3 flex items-center gap-3 text-[12.5px] text-muted-foreground">
+          <span className="min-w-0 flex-1 text-pretty">
+            {note ??
+              (elsewhere > 0
+                ? `New agents start on ${label}. ${elsewhere} of your ${total} agent${total === 1 ? " is" : "s are"} on something else.`
+                : `New agents start on ${label}, and so is every agent you have.`)}
+          </span>
+          {elsewhere > 0 && (
+            <Button size="sm" variant="secondary" onClick={() => void applyToAll()}>
+              Move all to {label}
+            </Button>
+          )}
+        </div>
+        <div className="mt-2 text-[12px] text-muted-foreground">
+          Each agent can still be set differently in its own settings. Shared rooms always ask, whatever is set here.
+        </div>
+      </div>
+    </SettingsGroup>
+  );
+}
+
 function PageBody({ id }: { id: string }) {
   switch (id) {
     case "general":
@@ -638,7 +698,12 @@ function PageBody({ id }: { id: string }) {
     case "new-agents":
       return <AgentDefaults />;
     case "rules":
-      return <RulesPanel />;
+      return (
+        <>
+          <WorkspaceApprovals />
+          <RulesPanel />
+        </>
+      );
     case "voices":
       return (
         <SettingsGroup title="Keys">

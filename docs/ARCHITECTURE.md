@@ -134,6 +134,17 @@ is lost or half the recent posts failed. Status shows green only when
 both hold, because a lossy network can keep the stream open while every
 reply goes nowhere.
 
+The relay takes 2 MB a payload, and sealing grows an answer by about 1.8
+times. So a request that arrives through it gets transcripts cut to their
+newest part: `GET /api/bots`, `GET /api/bloks` and a lane switch each fit
+in about 700 KB of messages, shared evenly so one long conversation cannot
+starve the rest, and each transcript says how many `olderMessages` stayed
+behind. `GET /api/bots/:id/messages?thread=&before=` and
+`GET /api/bloks/:id/messages?before=` page back through them. Requests from
+this machine or the same network are not cut. An answer that would still be
+too big is replaced with a short 413, so the phone hears why instead of
+waiting out the relay's timeout.
+
 ## Rehearsals
 
 `server/rehearsals.ts` clones the agent's folder (copy-on-write with

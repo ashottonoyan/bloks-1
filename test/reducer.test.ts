@@ -298,3 +298,15 @@ test("an agent announced before the reply that made it is not listed twice", () 
   assert.deepEqual(state.bots.map((b) => b.id), ["n"]);
   assert.equal(state.selectedId, "n");
 });
+
+test("a page of earlier messages lands above, once, and only on the lane it was for", () => {
+  const state = withState({ bots: [bot("a", { messages: [msg("m3"), msg("m4")], olderMessages: 2 })] });
+  const page = { type: "earlierLoaded" as const, id: "a", threadId: "t-a", messages: [msg("m1"), msg("m2"), msg("m3")], olderMessages: 0 };
+  const next = reducer(state, page);
+  const a = next.bots[0];
+  assert.deepEqual(a.messages.map((m) => m.id), ["m1", "m2", "m3", "m4"]);
+  assert.equal(a.olderMessages, 0);
+  // the lane changed while the page was loading: the page is not this lane's
+  const moved = reducer(state, { ...page, threadId: "t-other" });
+  assert.equal(moved.bots[0].messages.length, 2);
+});

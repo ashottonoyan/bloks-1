@@ -22,6 +22,7 @@ import { AgentAvatar } from "./Avatar";
 import { RoutinesDialog } from "./RoutinesDialog";
 import { GroupCallButton } from "./Voice";
 import { windowStart, TRANSCRIPT_WINDOW } from "@/lib/transcript";
+import { useEarlier } from "@/lib/useEarlier";
 import { ArtifactCard } from "./Artifacts";
 import {
   ForwardDialog,
@@ -408,12 +409,17 @@ export function RoomView({ blok }: { blok: Blok }) {
       el.scrollTop += el.scrollHeight - preExpand.current;
       preExpand.current = null;
     }
-  }, [start]);
+    // a page from the server lands above with start still at 0
+  }, [start, blok.messages.length]);
 
+  const earlier = useEarlier("room", { ...blok, threadId: blok.id });
   const showEarlier = () => {
     preExpand.current = scrollRef.current?.scrollHeight ?? null;
     pinned.current = false;
-    setBoundary(Math.max(0, start - TRANSCRIPT_WINDOW));
+    if (start > 0) return setBoundary(Math.max(0, start - TRANSCRIPT_WINDOW));
+    // everything here is showing; the rest is still on the computer
+    setBoundary(0);
+    void earlier.load();
   };
 
   useEffect(() => {
@@ -637,12 +643,14 @@ export function RoomView({ blok }: { blok: Blok }) {
           />
         ) : (
         <div className="mx-auto flex max-w-[760px] flex-col gap-2 pb-4 pt-3">
-          {start > 0 && (
+          {(start > 0 || earlier.remaining > 0) && (
             <button
               onClick={showEarlier}
-              className="mx-auto mt-3 rounded-full border px-3.5 py-1.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:border-foreground/25 hover:text-foreground"
+              disabled={earlier.loading}
+              className="mx-auto mt-3 inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:border-foreground/25 hover:text-foreground disabled:opacity-60"
             >
-              Show earlier messages ({start} more)
+              {earlier.loading && <Loader2 size={12} className="animate-spin" />}
+              Show earlier messages ({start + earlier.remaining} more)
             </button>
           )}
           {visibleMessages.map((m, i) => {

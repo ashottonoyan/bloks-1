@@ -59,6 +59,10 @@ export function relayInviteFor(req: IncomingMessage): string | null {
 const INVITE_ROUTES = new Set(["POST /api/member/claim", "GET /api/member/claim"]);
 /** The relay takes 2 MB a payload; sealing and base64 add about a third. */
 const MAX_RAW_ANSWER = 1_400_000;
+/** The relay counts the whole result post against its 2 MB and hangs up
+ * past it, which reads here as a lost connection. Stay under with room
+ * for the id and status around the payload. */
+const MAX_RESULT_POST = 1_950_000;
 
 /** Who a wake should reach: everybody (a string) or the phones registered
  * by the named relay client digests. `preview` asks for the notification's
@@ -690,7 +694,11 @@ export class RelayLink {
   private answerRaw(id: string, status: number, type: string, z: string, key: Buffer, deviceId: string) {
     if (!this.config) return;
     const payload = seal(key, deviceId, { status, type, z });
-    void this.deliver(JSON.stringify({ id, status, payload }), 15_000);
+    const post = JSON.stringify({ id, status, payload });
+    if (post.length > MAX_RESULT_POST) {
+      return this.answer(id, 413, { error: "too large to open through Bloks Cloud" }, key, deviceId);
+    }
+    void this.deliver(post, 15_000);
   }
 
   /**
@@ -737,10 +745,17 @@ export class RelayLink {
     this.answer(id, status, null, null, null);
   }
 
-  private answer(id: string, status: number, body: unknown, key: Buffer | null, deviceId: string | null) {
+  private answer(id: string, status: number, body: unknown, key: Buffer | null, deviceId: string | null): void {
     if (!this.config) return;
     const payload = key && deviceId ? seal(key, deviceId, { status, body }) : "";
-    void this.deliver(JSON.stringify({ id, status, payload }), 8_000);
+    const post = JSON.stringify({ id, status, payload });
+    // Too big for the relay: sending it would only be cut off, retried
+    // and cut off again while the phone waits. Say so in a few bytes
+    // instead, so the phone hears why rather than "did not answer".
+    if (post.length > MAX_RESULT_POST && status !== 413) {
+      return this.answer(id, 413, { error: "too large to send through Bloks Cloud" }, key, deviceId);
+    }
+    void this.deliver(post, 8_000);
   }
 
   /**

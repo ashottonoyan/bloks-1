@@ -16,6 +16,7 @@ import { MessageComponent } from "./Gallery";
 import { Composer } from "./Composer";
 import { TerminalPanel } from "./Terminal";
 import { showTypingDots, windowStart, TRANSCRIPT_WINDOW } from "@/lib/transcript";
+import { useEarlier } from "@/lib/useEarlier";
 import { findHits, splitHighlight, stepHit } from "@/lib/find";
 import { splitBlocks, type TableBlock } from "@/lib/markdownTable";
 import { parseInline, type InlineToken } from "@/lib/inlineMarkdown";
@@ -709,7 +710,8 @@ export function ChatView({ bot }: { bot: Bot }) {
       el.scrollTop += el.scrollHeight - preExpand.current;
       preExpand.current = null;
     }
-  }, [start]);
+    // a page from the server lands above with start still at 0
+  }, [start, bot.messages.length]);
 
   // Walk to a hit: render it, then bring it to the middle of the view.
   useEffect(() => {
@@ -718,10 +720,14 @@ export function ChatView({ bot }: { bot: Bot }) {
     row?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [currentHit, visibleStart]);
 
+  const earlier = useEarlier("bot", bot);
   const showEarlier = () => {
     preExpand.current = scrollRef.current?.scrollHeight ?? null;
     pinned.current = false;
-    setBoundary(Math.max(0, start - TRANSCRIPT_WINDOW));
+    if (start > 0) return setBoundary(Math.max(0, start - TRANSCRIPT_WINDOW));
+    // everything here is showing; the rest is still on the computer
+    setBoundary(0);
+    void earlier.load();
   };
 
   const first = bot.messages[0];
@@ -884,12 +890,14 @@ export function ChatView({ bot }: { bot: Bot }) {
         className="flex-1 overflow-y-auto px-4 md:px-6 [overflow-anchor:none]"
       >
         <div className="mx-auto flex max-w-[760px] flex-col gap-2.5 pb-4 pt-2">
-          {start > 0 ? (
+          {start > 0 || earlier.remaining > 0 ? (
             <button
               onClick={showEarlier}
-              className="mx-auto mt-3 rounded-full border px-3.5 py-1.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:border-foreground/25 hover:text-foreground"
+              disabled={earlier.loading}
+              className="mx-auto mt-3 inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:border-foreground/25 hover:text-foreground disabled:opacity-60"
             >
-              Show earlier messages ({start} more)
+              {earlier.loading && <Loader2 size={12} className="animate-spin" />}
+              Show earlier messages ({start + earlier.remaining} more)
             </button>
           ) : (
             first && (

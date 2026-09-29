@@ -708,6 +708,38 @@ function normalizeSection(
   return { ok: true, section: name };
 }
 
+/** How much transcript one answer through Bloks Cloud may carry, as JSON.
+ * The relay takes 2 MB a payload and sealing grows a body by about 1.8x,
+ * so a list of every conversation in full stops arriving once a few of
+ * them get long. Local and same-network callers are not limited. */
+const RELAY_TRANSCRIPT_BUDGET = 700_000;
+const RELAY_TAIL = 100;
+
+/** The newest messages of one transcript that fit in `bytes`, and how many
+ * older ones were left for the client to ask for. */
+function tailWithin(list: Message[], count: number, bytes: number): { messages: Message[]; olderMessages: number } {
+  let used = 0;
+  let start = list.length;
+  while (start > 0 && list.length - start < count) {
+    const size = JSON.stringify(list[start - 1]).length;
+    if (used + size > bytes) break;
+    used += size;
+    start--;
+  }
+  return { messages: list.slice(start), olderMessages: start };
+}
+
+/** Several transcripts in one relayed answer: each gets the same share,
+ * halved until the whole answer fits, so one long conversation cannot
+ * crowd out every other agent's latest words. */
+function fitTranscripts(lists: Message[][], tail = RELAY_TAIL): Array<{ messages: Message[]; olderMessages: number }> {
+  for (let share = 200_000; ; share = Math.floor(share / 2)) {
+    const cut = lists.map((list) => tailWithin(list, tail, share));
+    const total = cut.reduce((n, c) => n + JSON.stringify(c.messages).length, 0);
+    if (total <= RELAY_TRANSCRIPT_BUDGET || share <= 4_000) return cut;
+  }
+}
+
 function clientBot(bot: BotRecord | null) {
   if (!bot) return bot;
   const { resumeCursors: _cursors, tasks, ...visible } = bot;
@@ -5652,6 +5684,23 @@ const server = createServer(async (req, res) => {
     : local
       ? null
       : deviceForToken(bearerToken(req));
+  // One conversation's transcript as this caller may receive it: whole
+  // here and on the same network, its newest part through Bloks Cloud,
+  // with the count of what is left to ask for. olderMessages is always
+  // said, so switching lanes never keeps the last lane's count.
+  const laneFor = (threadId: string) =>
+    viaRelay
+      ? tailWithin(store.messagesFor(threadId), RELAY_TAIL, RELAY_TRANSCRIPT_BUDGET)
+      : { messages: store.messagesFor(threadId), olderMessages: 0 };
+
+  const earlierPage = (list: Message[], url: URL) => {
+    const before = url.searchParams.get("before");
+    const end = before ? list.findIndex((msg) => msg.id === before) : list.length;
+    if (end < 0) return { messages: [], olderMessages: 0 };
+    const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || RELAY_TAIL));
+    return tailWithin(list.slice(0, end), limit, viaRelay ? RELAY_TRANSCRIPT_BUDGET : Infinity);
+  };
+
   if (caller?.personId) {
     try {
       return await serveMember(req, res, method, path, url, caller);
@@ -5706,13 +5755,17 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && path === "/api/bots") {
       // ?messages=N trims each transcript to its tail. Phones hydrate
       // with a page and fetch history if someone actually scrolls.
+      // Through Bloks Cloud the list is also held to what the relay can
+      // carry, and each agent says how many older messages stayed behind.
       const tail = Number(url.searchParams.get("messages") ?? NaN);
       const trim = (list: Message[]) =>
         Number.isFinite(tail) && tail >= 0 ? list.slice(-tail) : list;
+      const lists = store.bots.map((b) => trim(store.messagesFor(b.threadId)));
+      const fitted = viaRelay ? fitTranscripts(lists, Number.isFinite(tail) && tail >= 0 ? tail : RELAY_TAIL) : null;
       return json(res, 200, {
-        bots: store.bots.map((b) => ({
+        bots: store.bots.map((b, i) => ({
           ...clientBot(b)!,
-          messages: trim(store.messagesFor(b.threadId)),
+          ...(fitted ? fitted[i] : { messages: lists[i] }),
         })),
       });
     }
@@ -6266,6 +6319,17 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { message: patched });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages$/);
+    if (m && method === "GET") {
+      // Earlier messages of one of this agent's conversations, the page
+      // before `before`, for a transcript that arrived trimmed.
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such agent" });
+      const thread = url.searchParams.get("thread") || bot.threadId;
+      if (thread !== bot.threadId && !(bot.tasks ?? []).some((t) => t.id === thread)) {
+        return json(res, 404, { error: "no such conversation" });
+      }
+      return json(res, 200, earlierPage(store.messagesFor(thread), url));
+    }
     if (m && method === "POST") {
       const body = await readBody(req);
       // Truncating would drop the tail of what someone wrote without
@@ -7301,7 +7365,7 @@ const server = createServer(async (req, res) => {
       if (!task) return json(res, 409, { error: `an agent runs at most ${MAX_TASKS} tasks` });
       const fresh = store.bot(bot.id)!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
-      return json(res, 201, { bot: { ...clientBot(fresh), messages: store.messagesFor(task.id) } });
+      return json(res, 201, { bot: { ...clientBot(fresh), ...laneFor(task.id) } });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/activate$/);
     if (m && method === "POST") {
@@ -7310,7 +7374,7 @@ const server = createServer(async (req, res) => {
       store.markLane(m[1], m[2], false);
       const fresh = store.bot(m[1])!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
-      return json(res, 200, { bot: { ...clientBot(fresh), messages: store.messagesFor(m[2]) } });
+      return json(res, 200, { bot: { ...clientBot(fresh), ...laneFor(m[2]) } });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)$/);
     if (m && method === "PATCH") {
@@ -7324,7 +7388,7 @@ const server = createServer(async (req, res) => {
       store.patchTaskTitle(m[1], m[2], title);
       const fresh = store.bot(m[1])!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
-      return json(res, 200, { bot: { ...clientBot(fresh), messages: store.messagesFor(fresh.activeTaskId) } });
+      return json(res, 200, { bot: { ...clientBot(fresh), ...laneFor(fresh.activeTaskId) } });
     }
     if (m && method === "DELETE") {
       const outcome = store.deleteTask(m[1], m[2]);
@@ -7335,7 +7399,7 @@ const server = createServer(async (req, res) => {
       return json(
         res,
         200,
-        { bot: { ...clientBot(fresh), messages: store.messagesFor(fresh.activeTaskId) } },
+        { bot: { ...clientBot(fresh), ...laneFor(fresh.activeTaskId) } },
       );
     }
 
@@ -7691,11 +7755,14 @@ const server = createServer(async (req, res) => {
       // name and roster of the rest: enough to ask to be added to one,
       // which is the only reason it needs to know they exist.
       return json(res, 200, {
-        bloks: bloks.bloks.map((b) =>
-          !asAgent || b.memberIds.includes(asAgent.botId)
-            ? { ...b, messages: store.messagesFor(b.id) }
-            : { id: b.id, name: b.name, memberIds: b.memberIds, archived: b.archived, messages: [] },
-        ),
+        bloks: (() => {
+          const fitted = viaRelay ? fitTranscripts(bloks.bloks.map((b) => store.messagesFor(b.id))) : null;
+          return bloks.bloks.map((b, i) =>
+            !asAgent || b.memberIds.includes(asAgent.botId)
+              ? { ...b, ...(fitted ? fitted[i] : { messages: store.messagesFor(b.id) }) }
+              : { id: b.id, name: b.name, memberIds: b.memberIds, archived: b.archived, messages: [] },
+          );
+        })(),
       });
     }
     if (method === "POST" && path === "/api/bloks") {
@@ -7768,6 +7835,13 @@ const server = createServer(async (req, res) => {
       return json(res, ok ? 200 : 404, ok ? { ok: true } : { error: "no such room" });
     }
     m = path.match(/^\/api\/bloks\/([\w-]+)\/messages$/);
+    if (m && method === "GET") {
+      const room = bloks.bloks.find((b) => b.id === m![1]);
+      if (!room || (asAgent && !room.memberIds.includes(asAgent.botId))) {
+        return json(res, 404, { error: "no such room" });
+      }
+      return json(res, 200, earlierPage(store.messagesFor(room.id), url));
+    }
     if (m && method === "POST") {
       const blok = bloks.get(m[1]);
       if (!blok) return json(res, 404, { error: "no such room" });

@@ -246,6 +246,77 @@ describe("the relay link", () => {
     assert.equal(back.problem, null);
   });
 
+  test("through the relay, long conversations arrive as their newest part, and the rest pages in", async () => {
+    // several megabytes of conversation, the size that stopped a phone
+    // from loading the list at all
+    const { bot } = await h.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Talker" }) });
+    for (let i = 0; i < 40; i++) {
+      await h.fetch(`/api/bots/${bot.id}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ text: `message ${i} ` + "x".repeat(90_000) }),
+      });
+    }
+    // each send starts a turn that fails here with a notice; let those land
+    let local = await h.json("/api/bots");
+    for (let settled = 0; settled < 3; ) {
+      await new Promise((r) => setTimeout(r, 150));
+      const again = await h.json("/api/bots");
+      const count = (x: any) => x.bots.reduce((n: number, b: any) => n + b.messages.length + (b.busy ? 1000 : 0), 0);
+      settled = count(again) === count(local) ? settled + 1 : 0;
+      local = again;
+    }
+    const whole = local.bots.find((b: any) => b.id === bot.id);
+    const ours = whole.messages.filter((m: any) => m.role === "user");
+    assert.equal(ours.length, 40, "on this machine the list stays whole");
+    assert.equal(whole.olderMessages ?? 0, 0);
+
+    const ask = async (id: string, path: string) => {
+      relay.ask(id, seal(sealKey, deviceId, { method: "GET", path }));
+      const got = await waitUntil(() => relay.results.get(id));
+      assert.ok(got, `no answer for ${path}`);
+      assert.ok(JSON.stringify(got).length < 2_000_000, "an answer bigger than the relay takes");
+      return open(openKey, peek(got!.payload)!) as { status: number; body: any };
+    };
+
+    const list = await ask("big-list", "/api/bots");
+    assert.equal(list.status, 200);
+    const trimmed = list.body.bots.find((b: any) => b.id === bot.id);
+    assert.ok(trimmed.olderMessages > 0, "a trimmed transcript did not say what it left behind");
+    assert.equal(trimmed.messages.length + trimmed.olderMessages, whole.messages.length);
+    assert.deepEqual(
+      trimmed.messages.map((m: any) => m.id),
+      whole.messages.slice(-trimmed.messages.length).map((m: any) => m.id),
+      "the trimmed part is not the newest",
+    );
+    // every other agent still got its latest words
+    for (const b of list.body.bots) {
+      const full = local.bots.find((x: any) => x.id === b.id);
+      if (full.messages.length) assert.ok(b.messages.length > 0, `${b.name} arrived empty`);
+    }
+
+    // walk back to the very first message, a page at a time
+    let messages = trimmed.messages;
+    let older = trimmed.olderMessages;
+    for (let page = 0; older > 0 && page < 20; page++) {
+      const q = `before=${messages[0].id}&thread=${trimmed.threadId}`;
+      const earlier = await ask(`page-${page}`, `/api/bots/${bot.id}/messages?${q}`);
+      assert.equal(earlier.status, 200);
+      assert.ok(earlier.body.messages.length > 0, "a page came back empty with more to go");
+      messages = [...earlier.body.messages, ...messages];
+      older = earlier.body.olderMessages;
+    }
+    assert.equal(older, 0);
+    assert.deepEqual(
+      messages.map((m: any) => m.id),
+      whole.messages.map((m: any) => m.id),
+      "paging back did not rebuild the transcript",
+    );
+
+    // a conversation of another agent is not reachable through this one
+    const stray = await ask("stray", `/api/bots/${bot.id}/messages?thread=not-a-lane`);
+    assert.equal(stray.status, 404);
+  });
+
   test("broadcasts go out sealed, and only an approval asks for a buzz, with its words sealed too", async (t) => {
     const { createServer: mkFake } = await import("node:http");
 

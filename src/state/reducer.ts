@@ -169,6 +169,9 @@ export interface Bot {
    * the pixel avatar. Doubles as the cache-buster. */
   avatarAt?: number | null;
   unread: boolean;
+  /** Messages older than the first one here, still on the server. Only
+   * set when the transcript arrived trimmed, through Bloks Cloud. */
+  olderMessages?: number;
   busy?: boolean;
   /** Somebody has taken this agent's computer. Null when nobody has;
    * absent only from a harness too old to say. */
@@ -337,6 +340,9 @@ export interface Blok {
   /** Archived rooms are kept on the server and never listed here. */
   archived?: boolean;
   messages: Message[];
+  /** Messages older than the first one here, still on the server. Only
+   * set when the transcript arrived trimmed, through Bloks Cloud. */
+  olderMessages?: number;
 }
 
 /** How a shared room behaves, owner's choice. See server/bloks.ts. */
@@ -447,6 +453,9 @@ export interface AppState {
 
 export type Action =
   | { type: "hydrate"; bots: Bot[] }
+  /** A page of earlier messages for a transcript that arrived trimmed.
+   * `threadId` guards against a lane that changed while it was loading. */
+  | { type: "earlierLoaded"; id: string; threadId: string; messages: Message[]; olderMessages: number }
   | { type: "hydrateBloks"; bloks: Blok[] }
   | { type: "blokPatched"; blok: Omit<Blok, "messages"> }
   | { type: "roomPeople"; roomId: string; people: RoomPerson[] }
@@ -612,6 +621,17 @@ export function reducer(state: AppState, action: Action): AppState {
           ? wanted
           : (action.bots.find((b) => !b.hidden)?.id ?? "");
       return { ...state, bots: action.bots, selectedId };
+    }
+    case "earlierLoaded": {
+      const prepend = <T extends { messages: Message[]; olderMessages?: number }>(t: T): T => {
+        const have = new Set(t.messages.map((m) => m.id));
+        const fresh = action.messages.filter((m) => !have.has(m.id));
+        return { ...t, messages: [...fresh, ...t.messages], olderMessages: action.olderMessages };
+      };
+      if (state.bloks.some((b) => b.id === action.id)) {
+        return { ...state, bloks: state.bloks.map((b) => (b.id === action.id ? prepend(b) : b)) };
+      }
+      return updateBot(state, action.id, (b) => (b.threadId === action.threadId ? prepend(b) : b));
     }
     case "hydrateBloks": {
       // the server keeps archived rooms; the list only hides them, and a

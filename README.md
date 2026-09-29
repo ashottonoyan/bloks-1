@@ -91,6 +91,12 @@ agent's skills by name, including the ones installed for Claude Code.
 `rm -rf`." Rules are decided before an agent acts, not after, and only
 what they do not cover reaches you. A deny always beats an allow.
 
+**As careful as you want.** Choose once, during setup or in Settings,
+how much agents ask: **Ask first**, **Accept edits**, **Auto** (only
+your rules refuse), or **Full access**, which takes the engines' own
+guards off too, with no prompts and no sandbox. Every new agent starts
+there, any agent can be set differently, and shared rooms always ask.
+
 **Take the wheel.** Driving something yourself for a minute stops the
 agent: no turns start, routines skip, the job board looks elsewhere, and
 anything it was mid-way through is interrupted. Refused rather than

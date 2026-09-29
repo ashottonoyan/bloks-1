@@ -281,6 +281,20 @@ same list. Escape is handled once (`src/lib/useEscape.ts`): the most
 recently opened surface that asked for it closes, and Radix menus and
 dialogs keep their own.
 
+## Approval modes
+
+An agent's `approvals` is `ask`, `edits`, `auto` or `full`, and new agents
+start on `cfg.agentDefaults.approvals` (`GET`/`PUT /api/approvals`, which
+can also move every agent; never reachable with an agent's credential).
+The first three are Bloks' own gate: deny rules first, then the mode
+decides whether a request becomes a card. `full` also sets `fullAccess`
+on the turn, and each driver takes its engine's own guard off: Claude
+Code runs with `bypassPermissions` and no approval bridge, Codex with
+`danger-full-access` and `approvalPolicy: never` (stated on resume too),
+ACP engines in their `yolo` mode, Antigravity with
+`--dangerously-skip-permissions`. Nothing asks, so rules cannot refuse
+anything in that mode. A shared room never gets `fullAccess`.
+
 ## Boundaries worth knowing
 
 - `server/http-guard.ts` checks `Origin` and `Host` on every request.

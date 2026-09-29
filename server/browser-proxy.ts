@@ -31,7 +31,9 @@ let attachedTo = "";
 
 /** The page an agent means: the one it last used, or the newest open. */
 async function page(): Promise<Session> {
-  if (session && attachedTo) return session;
+  if (session && attachedTo && session.attached) return session;
+  // the page went away since the last call: start over from the list
+  if (session) drop();
   if (PROFILE) await launch(PROFILE, PORT);
   const targets = await listTargets(PORT);
   if (!targets.length) throw new Error("no page open. Use open with a URL first");

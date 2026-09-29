@@ -41,6 +41,7 @@ import { attachRpc } from "../harness/jsonrpc-stdio.ts";
 import { onPath, widenPath } from "../path.ts";
 import { appendNative } from "./native.ts";
 import { describeEarlyExit, describeSpawnError } from "./spawn-error.ts";
+import { within } from "./deadline.ts";
 
 export interface AcpSpec {
   kind: string;
@@ -435,7 +436,7 @@ export function acpDriver(spec: AcpSpec): ProviderDriver<AcpConfig> {
 
         (async () => {
           try {
-            await rpc.request("initialize", CLIENT_HELLO);
+            await within(rpc.request("initialize", CLIENT_HELLO), "starting up", spec.name);
 
             const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             const cwd = turn.cwd ?? homedir();
@@ -461,13 +462,20 @@ export function acpDriver(spec: AcpSpec): ProviderDriver<AcpConfig> {
             let session: any = null;
             if (cursor) {
               try {
-                session = (await rpc.request("session/load", { cwd, mcpServers, sessionId: cursor })) ?? {};
+                session =
+                  (await within(
+                    rpc.request("session/load", { cwd, mcpServers, sessionId: cursor }),
+                    "reopening the conversation",
+                    spec.name,
+                  )) ?? {};
                 session.sessionId ??= cursor;
               } catch {
                 /* the agent forgot this session; start a new one below */
               }
             }
-            if (!session) session = await rpc.request("session/new", { cwd, mcpServers });
+            if (!session) {
+              session = await within(rpc.request("session/new", { cwd, mcpServers }), "opening a session", spec.name);
+            }
             sessionId = session?.sessionId ?? null;
             if (!sessionId) throw new Error(`${spec.name} did not open a session`);
 

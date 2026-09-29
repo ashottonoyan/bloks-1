@@ -33,6 +33,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
 import { describeEarlyExit, describeSpawnError } from "./spawn-error.ts";
+import { within } from "./deadline.ts";
 
 const DRIVER_KIND = "codex";
 const NATIVE_SOURCE = "codex.app-server";
@@ -555,7 +556,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // locked against a process that is never going to answer.
       void (async () => {
         try {
-          await rpc.request("initialize", { clientInfo: { name: "bloks", version: "1" } });
+          await within(rpc.request("initialize", { clientInfo: { name: "bloks", version: "1" } }), "starting up", "Codex");
           rpc.notify("initialized", {});
 
           const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
@@ -572,7 +573,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
           if (cursor) {
             try {
-              const resumed = await rpc.request("thread/resume", { threadId: cursor, ...guard });
+              const resumed = await within(
+                rpc.request("thread/resume", { threadId: cursor, ...guard }),
+                "reopening the conversation",
+                "Codex",
+              );
               codexThread = resumed?.thread?.id ?? cursor;
             } catch {
               /* forgotten or unsupported; a fresh thread below */
@@ -591,13 +596,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             if (turn.effort) startParams.reasoningEffort = turn.effort;
             let started: any;
             try {
-              started = await rpc.request("thread/start", startParams);
+              started = await within(rpc.request("thread/start", startParams), "opening a conversation", "Codex");
             } catch (error) {
               // An app-server old enough to refuse the effort field should
               // cost the user their preference, not their message.
               if (!turn.effort) throw error;
               delete startParams.reasoningEffort;
-              started = await rpc.request("thread/start", startParams);
+              started = await within(rpc.request("thread/start", startParams), "opening a conversation", "Codex");
             }
             codexThread = started?.thread?.id ?? null;
             reportedModel = started?.model ?? null;
@@ -610,12 +615,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             model: reportedModel ?? turn.model ?? null,
           });
 
-          await rpc.request("turn/start", {
+          await within(rpc.request("turn/start", {
             threadId: codexThread,
             input: [
               { type: "text", text: turn.system ? `${turn.system}\n\n${turn.text}` : turn.text },
             ],
-          });
+          }), "starting the turn", "Codex");
         } catch (error) {
           if (finished) return;
           emit({

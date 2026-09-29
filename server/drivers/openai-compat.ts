@@ -32,6 +32,14 @@ export interface CompatConfig {
   apiKeyEnv: string;
 }
 
+/** How long a streamed reply may go without a byte before it is treated
+ * as dead. Generous: some providers pause while a long tool call is
+ * planned, but none go quiet for this long and come back. Tests shorten
+ * it through the environment. */
+const STREAM_IDLE_MS = Number(process.env.BLOKS_STREAM_IDLE_MS) || 90_000;
+/** One round of the tool loop, which does not stream: a whole answer. */
+const ROUND_TIMEOUT_MS = 5 * 60_000;
+
 /** How long a fetched model list is trusted before we look again. */
 const CATALOG_TTL_MS = 10 * 60_000;
 
@@ -425,10 +433,36 @@ export function openAiCompatDriver(spec: ProviderSpec): ProviderDriver<CompatCon
         const reader = res.body!.getReader();
         const decoder = new TextDecoder();
         let buf = "";
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
+        // A stream that stops sending is dead, not thinking: an API streams
+        // its keepalives and tokens as it goes. Without this, a turn with
+        // its own abort signal (every chat turn) had no deadline at all and
+        // sat on "working" until someone pressed stop.
+        const read = () =>
+          new Promise<{ done: boolean; value?: Uint8Array }>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              void reader.cancel().catch(() => {});
+              reject(new Error(`${spec.name} stopped sending for ${STREAM_IDLE_MS / 1000} seconds, so this reply was cut off. Send it again.`));
+            }, STREAM_IDLE_MS);
+            reader.read().then(
+              (r) => {
+                clearTimeout(timer);
+                resolve(r);
+              },
+              (e) => {
+                clearTimeout(timer);
+                reject(e);
+              },
+            );
+          });
+        for (let ended = false; !ended; ) {
+          const { done, value } = await read();
+          if (done) {
+            // the last event can arrive without its trailing newline
+            buf += decoder.decode() + "\n";
+            ended = true;
+          } else {
+            buf += decoder.decode(value, { stream: true });
+          }
           let nl;
           while ((nl = buf.indexOf("\n")) !== -1) {
             const line = buf.slice(0, nl).trim();
@@ -468,12 +502,23 @@ export function openAiCompatDriver(spec: ProviderSpec): ProviderDriver<CompatCon
         tools: any[],
         signal: AbortSignal,
       ): Promise<{ message: any; usage: { input: number; output: number } | null }> => {
-        const res = await fetch(`${config.url}/chat/completions`, {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ model, messages, tools, stream: false }),
-          signal,
-        });
+        // The turn's own signal ends it on stop; the bound ends it when the
+        // provider simply never answers, which the turn signal never does.
+        const bounded = AbortSignal.any([signal, AbortSignal.timeout(ROUND_TIMEOUT_MS)]);
+        let res: Response;
+        try {
+          res = await fetch(`${config.url}/chat/completions`, {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ model, messages, tools, stream: false }),
+            signal: bounded,
+          });
+        } catch (e) {
+          if ((e as Error).name === "TimeoutError") {
+            throw new Error(`${spec.name} took more than ${ROUND_TIMEOUT_MS / 60_000} minutes to answer, so this reply was stopped. Send it again.`);
+          }
+          throw e;
+        }
         if (!res.ok) {
           const body = await res.text().catch(() => "");
           throw new Error(`${spec.name} HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);

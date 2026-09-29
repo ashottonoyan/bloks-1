@@ -119,12 +119,32 @@ export class Session {
     this.url = url;
   }
 
-  async open(): Promise<void> {
+  /** Whether the socket to the page is still up. A tab that closed
+   * leaves a session object behind that can no longer do anything. */
+  get attached(): boolean {
+    return this.socket !== null;
+  }
+
+  async open(timeoutMs = 10_000): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(this.url);
-      const failed = (event: Event | CloseEvent) =>
+      // like every call on it, attaching is bounded: a debugging port that
+      // accepts the connection and never finishes the upgrade would
+      // otherwise hold the tool, and the turn, forever
+      const timer = setTimeout(() => {
+        try {
+          socket.close();
+        } catch {
+          /* never opened */
+        }
+        reject(new Error("could not attach to the page in time"));
+      }, timeoutMs);
+      const failed = (event: Event | CloseEvent) => {
+        clearTimeout(timer);
         reject(new Error(`could not attach to the page (${(event as CloseEvent).code ?? "error"})`));
+      };
       socket.addEventListener("open", () => {
+        clearTimeout(timer);
         this.socket = socket;
         socket.removeEventListener("error", failed);
         resolve();

@@ -1,4 +1,4 @@
-// The inline part of a reply's markdown: bold, code and links.
+// The inline part of a reply's markdown: bold, italic, code and links.
 //
 // Parsed into tokens rather than HTML, so a model's text only ever reaches
 // the page as text nodes and elements the renderer chose. A link is the
@@ -10,6 +10,7 @@ export type InlineToken =
   | { kind: "text"; text: string }
   | { kind: "code"; text: string }
   | { kind: "bold"; children: InlineToken[] }
+  | { kind: "italic"; children: InlineToken[] }
   | { kind: "link"; href: string; children: InlineToken[] };
 
 /** The only link targets a reply can produce. mailto is not one: the Mac
@@ -30,7 +31,11 @@ const BARE = /https?:\/\/(?:[^\s<>"`*]|\*(?!\*))+/iy;
 
 /** What starts a token. A bare URL must not continue a word, so
  * "foohttps://" and the url inside "[a](https://...)" are not seen here. */
-const START = /`[^`]+`|\*\*[^*]+\*\*|\[|(?<![\w/@])https?:\/\//gi;
+// Italic is strict on purpose: the markers hug the words, and neither side
+// touches a letter or another marker. So *beta* and _beta_ are italic, and
+// 2 * 3 * 4, snake_case_names and a bullet's leading "* " are left alone.
+const START =
+  /`[^`]+`|\*\*[^*]+\*\*|(?<![\w*])\*(?![\s*])[^*\n]*?[^\s*]\*(?![\w*])|(?<![\w*])\*[^\s*]\*(?![\w*])|(?<![\w_])_(?![\s_])[^_\n]*?[^\s_]_(?![\w_])|(?<![\w_])_[^\s_]_(?![\w_])|\[|(?<![\w/@])https?:\/\//gi;
 
 /**
  * Sentence punctuation after a bare URL belongs to the sentence, and a
@@ -116,6 +121,10 @@ export function parseInline(text: string, links = true): InlineToken[] {
     } else if (tok.startsWith("**")) {
       pushText(text.slice(last, at));
       out.push({ kind: "bold", children: parseInline(tok.slice(2, -2), links) });
+      last = at + tok.length;
+    } else if ((tok.startsWith("*") || tok.startsWith("_")) && tok.length > 2) {
+      pushText(text.slice(last, at));
+      out.push({ kind: "italic", children: parseInline(tok.slice(1, -1), links) });
       last = at + tok.length;
     } else if (tok === "[") {
       const link = links ? readLink(text, at) : null;

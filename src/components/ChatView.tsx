@@ -18,9 +18,7 @@ import { TerminalPanel } from "./Terminal";
 import { showTypingDots, windowStart, TRANSCRIPT_WINDOW } from "@/lib/transcript";
 import { useEarlier } from "@/lib/useEarlier";
 import { useLanesInSidebar } from "@/lib/conversationsView";
-import { findHits, splitHighlight, stepHit } from "@/lib/find";
-import { splitBlocks, type TableBlock } from "@/lib/markdownTable";
-import { parseInline, type InlineToken } from "@/lib/inlineMarkdown";
+import { findHits, stepHit } from "@/lib/find";
 import { attachmentBasename, splitAttachments } from "@/lib/attachments";
 import { TaskStrip } from "./TaskStrip";
 import { CallButton } from "./Voice";
@@ -40,11 +38,10 @@ import {
 } from "./MessageActions";
 import { ModelPicker } from "./ModelPicker";
 import { EngineSetupActions } from "./EngineSetup";
+import { Markdownish, withHighlight } from "./Markdown";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
-// Minimal markdown for bot bubbles: **bold**, `code`, headings, lists.
-// Rendered as React nodes, model output never reaches the DOM as HTML.
 /**
  * A user bubble's text with its attachment tags lifted out: images come
  * back as thumbnails, files as small name chips, and what remains is
@@ -80,176 +77,6 @@ function UserText({ text, highlight }: { text: string; highlight?: string }) {
         </div>
       )}
       {withHighlight([display], highlight ?? "")}
-    </>
-  );
-}
-
-/** Wraps every occurrence of the query in the plain-text parts of an
- * already-rendered line. Elements are left alone: breaking a code span
- * to paint it yellow trades a working transcript for a search result. */
-function withHighlight(nodes: React.ReactNode[], query: string): React.ReactNode[] {
-  if (!query.trim()) return nodes;
-  const out: React.ReactNode[] = [];
-  nodes.forEach((node, i) => {
-    if (typeof node !== "string") {
-      out.push(node);
-      return;
-    }
-    for (const [j, part] of splitHighlight(node, query).entries()) {
-      out.push(
-        part.hit ? (
-          <mark key={`h-${i}-${j}`} className="rounded-[3px] bg-warning/40 px-px text-inherit">
-            {part.text}
-          </mark>
-        ) : (
-          part.text
-        ),
-      );
-    }
-  });
-  return out;
-}
-
-/** Bold, code and links, as elements, with the search highlight painted
- * into the text of each, links and bold included. */
-function inlineMd(text: string, keyBase: string, highlight: string): React.ReactNode[] {
-  const render = (tokens: InlineToken[], key: string): React.ReactNode[] =>
-    tokens.flatMap((token, i): React.ReactNode[] => {
-      const k = `${key}-${i}`;
-      switch (token.kind) {
-        case "text":
-          return withHighlight([token.text], highlight).map((node, j) =>
-            typeof node === "string" ? node : <span key={`${k}-${j}`}>{node}</span>,
-          );
-        case "code":
-          return [
-            <code key={k} className="rounded bg-foreground/[0.07] px-1 py-px font-mono text-[12.5px]">
-              {token.text}
-            </code>,
-          ];
-        case "bold":
-          return [<strong key={k}>{render(token.children, k)}</strong>];
-        case "link":
-          return [
-            <a
-              key={k}
-              href={token.href}
-              target="_blank"
-              rel="noreferrer"
-              title={token.href}
-              className="break-words underline underline-offset-2 hover:opacity-80"
-            >
-              {render(token.children, k)}
-            </a>,
-          ];
-      }
-    });
-  return render(parseInline(text), keyBase);
-}
-
-/**
- * A table a model wrote, drawn as one.
- *
- * Scrolls inside its own box rather than widening the bubble: a
- * six-column comparison should not decide how wide the transcript is.
- */
-function MarkdownTable({ block, highlight }: { block: TableBlock; highlight: string }) {
-  const align = (i: number) => {
-    const a = block.aligns[i] ?? "left";
-    return a === "right" ? "text-right" : a === "center" ? "text-center" : "text-left";
-  };
-  return (
-    <div className="my-1.5 max-w-full overflow-x-auto rounded-xl border">
-      <table className="w-full border-collapse text-[12.5px]">
-        <thead>
-          <tr className="border-b bg-foreground/[0.04]">
-            {block.columns.map((column, i) => (
-              <th
-                key={i}
-                className={cn("px-2.5 py-1.5 font-semibold whitespace-nowrap", align(i))}
-              >
-                {inlineMd(column, `th${i}`, highlight)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {block.rows.map((row, r) => (
-            <tr key={r} className="border-b last:border-b-0">
-              {row.map((cell, c) => (
-                <td key={c} className={cn("px-2.5 py-1.5 align-top", align(c))}>
-                  {inlineMd(cell, `td${r}-${c}`, highlight)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Markdownish({ text, highlight = "" }: { text: string; highlight?: string }) {
-  const blocks = splitBlocks(text);
-  if (blocks.some((block) => block.kind === "table")) {
-    return (
-      <>
-        {blocks.map((block, b) =>
-          block.kind === "table" ? (
-            <MarkdownTable key={`t${b}`} block={block} highlight={highlight} />
-          ) : (
-            <Markdownish key={`l${b}`} text={block.lines.join("\n")} highlight={highlight} />
-          ),
-        )}
-      </>
-    );
-  }
-  return (
-    <>
-      {text.split("\n").map((line, i) => {
-        const heading = line.match(/^#{1,4}\s+(.*)$/);
-        if (heading) {
-          return (
-            <div key={i} className="mt-1.5 font-semibold">
-              {inlineMd(heading[1], `h${i}`, highlight)}
-            </div>
-          );
-        }
-        const bullet = line.match(/^\s*[-•*]\s+(.*)$/);
-        if (bullet) {
-          return (
-            <div key={i} className="flex gap-2 pl-1">
-              <span className="text-muted-foreground">•</span>
-              <span className="min-w-0">{inlineMd(bullet[1], `b${i}`, highlight)}</span>
-            </div>
-          );
-        }
-        const numbered = line.match(/^\s*(\d+)\.\s+(.*)$/);
-        if (numbered) {
-          return (
-            <div key={i} className="flex gap-2 pl-1">
-              <span className="text-muted-foreground">{numbered[1]}.</span>
-              <span className="min-w-0">{inlineMd(numbered[2], `n${i}`, highlight)}</span>
-            </div>
-          );
-        }
-        // A quoted line: what an agent is answering, or a forward's
-        // original. Left rule and quieter text, because the point is that
-        // it is somebody else's words, not this message's own.
-        const quoted = line.match(/^\s*>\s?(.*)$/);
-        if (quoted) {
-          return (
-            <div
-              key={i}
-              className="my-0.5 border-l-2 border-current/25 pl-2.5 text-current/70"
-            >
-              {quoted[1] ? inlineMd(quoted[1], `q${i}`, highlight) : null}
-            </div>
-          );
-        }
-        if (!line.trim()) return <div key={i} className="h-2.5" />;
-        return <div key={i}>{inlineMd(line, `p${i}`, highlight)}</div>;
-      })}
     </>
   );
 }

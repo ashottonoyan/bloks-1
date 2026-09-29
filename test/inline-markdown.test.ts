@@ -147,3 +147,13 @@ describe("isSafeHref", () => {
     assert.ok(!isSafeHref(" https://a.com"));
   });
 });
+
+test("italic hugs its words, and arithmetic and snake_case are left alone", () => {
+  const kinds = (text: string) => parseInline(text).map((t) => (t.kind === "text" ? t.text : t.kind));
+  assert.deepEqual(kinds("says *beta* twice"), ["says ", "italic", " twice"]);
+  assert.deepEqual(kinds("_quietly_ done"), ["italic", " done"]);
+  assert.deepEqual(kinds("2 * 3 * 4"), ["2 * 3 * 4"]);
+  assert.deepEqual(kinds("call snake_case_name now"), ["call snake_case_name now"]);
+  assert.deepEqual(kinds("**bold** then *soft*"), ["bold", " then ", "italic"]);
+  assert.deepEqual(kinds("`a*b*c`"), ["code"]);
+});

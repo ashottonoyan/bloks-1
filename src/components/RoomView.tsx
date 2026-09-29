@@ -33,6 +33,7 @@ import {
   type ReplyDraft,
 } from "./MessageActions";
 import { OptionCard } from "./OptionCard";
+import { Markdownish } from "./Markdown";
 import { ChangesCard } from "./ChangesCard";
 import { ToolRun } from "./ToolRun";
 import { Button } from "@/components/ui/button";
@@ -67,37 +68,6 @@ function seniorityOf(bot: Bot) {
   return bot.seniority ?? 1;
 }
 
-/** One line of a room message: a quote reads as a quote, everything
- * else keeps its @mention highlighting. Agents answering each other
- * quote what they are answering, and a bare ">" in the middle of a
- * sentence is the least useful way to show that. */
-function RoomLine({ line, names }: { line: string; names: string[] }) {
-  const quoted = line.match(/^\s*>\s?(.*)$/);
-  if (quoted) {
-    return (
-      <div className="my-0.5 border-l-2 border-border pl-2.5 text-muted-foreground">
-        {quoted[1] ? withMentions(quoted[1], names) : null}
-      </div>
-    );
-  }
-  if (!line.trim()) return <div className="h-2" />;
-  return <div>{withMentions(line, names)}</div>;
-}
-
-/** Highlight @mentions so it's obvious who a line was aimed at. */
-function withMentions(text: string, names: string[]): React.ReactNode[] {
-  if (!names.length) return [text];
-  const pattern = new RegExp(`(@(?:${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")}))`, "gi");
-  return text.split(pattern).map((part, i) =>
-    part.startsWith("@") ? (
-      <span key={i} className="font-medium text-brand-ink">
-        {part}
-      </span>
-    ) : (
-      part
-    ),
-  );
-}
 
 /** A person in a shared room: their initial, never an agent's avatar, so
  * who is a person and who is an agent is never in doubt. */
@@ -137,8 +107,12 @@ function RoomMessage({
   const nameOfReactor = (id: string) =>
     id === "user" ? "You" : (members.find((m) => m.id === id)?.name ?? "An agent");
 
-  const verbs = (author: string) => (
+  // Floating is for the agents' side: there the text fills the row, and
+  // an invisible bar beside it used to hold 150px of every line empty,
+  // which on a phone halved the width a message could use.
+  const verbs = (author: string, floating = false) => (
     <MessageActionBar
+      className={floating ? "absolute -top-3.5 right-0 z-10" : undefined}
       message={message}
       author={author}
       onReply={onReply}
@@ -171,14 +145,12 @@ function RoomMessage({
               <span className="text-[11px] text-muted-foreground">{formatTime(message.at)}</span>
             </div>
           )}
-          <div className="group flex items-center gap-1.5">
+          <div className="group relative flex items-center gap-1.5">
             <div className="min-w-0 rounded-2xl rounded-tl-md bg-muted px-3.5 py-2 text-[14.5px] leading-relaxed text-foreground">
               {message.replyTo && <ReplyContext replyTo={message.replyTo} />}
-              {(message.text ?? "").split("\n").map((line, i) => (
-                <RoomLine key={i} line={line} names={names} />
-              ))}
+              <Markdownish text={message.text ?? ""} mentions={names} />
             </div>
-            {verbs(who)}
+            {verbs(who, true)}
           </div>
         </div>
       </div>
@@ -265,19 +237,17 @@ function RoomMessage({
           // an agent can need you mid-room; the ask has to be answerable here
           <OptionCard botId={speaker.id} roomId={roomId} message={message} />
         ) : (
-          <div className="group flex items-center gap-1.5">
-            <div className="min-w-0 text-[14.5px] leading-relaxed text-foreground">
+          <div className="group relative flex items-center gap-1.5">
+            <div className="min-w-0 flex-1 text-[14.5px] leading-relaxed text-foreground">
               {message.replyTo && <ReplyContext replyTo={message.replyTo} />}
-              {(message.text ?? "").split("\n").map((line, i) => (
-                <RoomLine key={i} line={line} names={names} />
-              ))}
+              <Markdownish text={message.text ?? ""} mentions={names} />
               <Reactions
                 reactions={message.reactions}
                 onToggle={(emoji: string) => reactTo(roomId, message.id, emoji)}
                 nameOf={nameOfReactor}
               />
             </div>
-            {verbs(speaker.name)}
+            {verbs(speaker.name, true)}
           </div>
         )}
       </div>

@@ -291,6 +291,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ text: action.text, replyTo: action.replyTo }),
           }).catch(showError);
           break;
+        case "markLaneUnread":
+          api(`/api/bots/${action.botId}/tasks/${action.taskId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ unread: true }),
+          }).catch(() => {});
+          break;
         case "markUnread":
           api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify({ unread: true }) }).catch(
             () => {},

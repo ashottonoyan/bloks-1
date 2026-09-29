@@ -530,7 +530,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           message: describeSpawnError(error, {
             name: "Codex",
             command: config.cli,
-            install: "npm i -g @openai/codex",
+            install: "npm i -g --prefix ~/.local @openai/codex",
             signIn: "run `codex login`",
           }),
         });
@@ -637,9 +637,20 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         );
       });
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
-      // No cheap way to tell whether `codex login` has been run, so this
-      // reports installed and lets a real turn surface the rest.
-      return { state: "available", version };
+      // Installed is not signed in, and the gap between them is the first
+      // message failing. `codex login status` answers with its exit code;
+      // a CLI too old to know the subcommand falls back to the file its
+      // login writes, and a key in the environment counts as signed in.
+      const authenticated = await new Promise<boolean>((resolve) => {
+        if (process.env.OPENAI_API_KEY) return resolve(true);
+        execFile(config.cli, ["login", "status"], { timeout: 8_000 }, (error, stdout, stderr) => {
+          if (!error) return resolve(true);
+          const said = `${stdout}\n${stderr}`;
+          if (/not logged in|logged out/i.test(said)) return resolve(false);
+          resolve(existsSync(join(process.env.CODEX_HOME || join(homedir(), ".codex"), "auth.json")));
+        });
+      });
+      return { state: "available", version, authenticated };
     };
 
     return {

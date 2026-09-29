@@ -13,6 +13,7 @@ import { extname, join, resolve, sep } from "node:path";
 import * as attachments from "./attachments.ts";
 import * as box from "./box.ts";
 import * as diagnostics from "./diagnostics.ts";
+import { ENGINE_SETUP, installEngine, openSignIn } from "./engine-setup.ts";
 import * as scout from "./scout.ts";
 import {
   ArtifactCommentStore,
@@ -7363,6 +7364,14 @@ const server = createServer(async (req, res) => {
       const title = clamp(body.title, 40) || `Task ${bot.tasks.length + 1}`;
       const task = store.createTask(bot.id, title);
       if (!task) return json(res, 409, { error: `an agent runs at most ${MAX_TASKS} tasks` });
+      // Closing the last conversation leaves a blank General so the agent
+      // stays reachable. Starting a real one replaces that stand-in, if
+      // nothing was said in it, rather than listing a blank beside it.
+      for (const lane of [...bot.tasks]) {
+        if (lane.placeholder && lane.id !== task.id && !lane.busy && store.messagesFor(lane.id).length === 0) {
+          store.deleteTask(bot.id, lane.id);
+        }
+      }
       const fresh = store.bot(bot.id)!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
       return json(res, 201, { bot: { ...clientBot(fresh), ...laneFor(task.id) } });
@@ -7383,9 +7392,12 @@ const server = createServer(async (req, res) => {
       // prompt ("your conversation ..."), so it is one short line.
       const body = await readBody(req);
       const title = clamp(typeof body.title === "string" ? body.title.replace(/\s+/g, " ") : undefined, 40);
-      if (!title) return json(res, 400, { error: "a task needs a title" });
+      const unread = typeof body.unread === "boolean" ? body.unread : undefined;
+      if (!title && unread === undefined) return json(res, 400, { error: "a task needs a title" });
       if (!store.bot(m[1])?.tasks.some((t) => t.id === m![2])) return json(res, 404, { error: "no such task" });
-      store.patchTaskTitle(m[1], m[2], title);
+      if (title) store.patchTaskTitle(m[1], m[2], title);
+      // "mark as unread" on one conversation, from its row in the sidebar
+      if (unread !== undefined) store.markLane(m[1], m[2], unread);
       const fresh = store.bot(m[1])!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
       return json(res, 200, { bot: { ...clientBot(fresh), ...laneFor(fresh.activeTaskId) } });
@@ -7481,6 +7493,23 @@ const server = createServer(async (req, res) => {
     // ── provider instances (model picker) ──
     if (method === "GET" && path === "/api/instances") {
       return json(res, 200, { instances: await registry.describe() });
+    }
+
+    // Setting an engine up from the app (server/engine-setup.ts). This
+    // machine only: it installs software and opens Terminal, which no
+    // phone, remote window or agent may ask for.
+    if (method === "GET" && path === "/api/engines/setup") {
+      if (!local || asAgent) return json(res, 403, { error: "not from here" });
+      return json(res, 200, { setup: ENGINE_SETUP, platform: process.platform });
+    }
+    m = path.match(/^\/api\/engines\/([\w-]+)\/(install|signin)$/);
+    if (m && method === "POST") {
+      if (!local || asAgent) return json(res, 403, { error: "not from here" });
+      if (!ENGINE_SETUP[m[1]]) return json(res, 404, { error: "no such engine" });
+      if (m[2] === "signin") return json(res, 200, openSignIn(m[1]));
+      const result = await installEngine(m[1]);
+      record({ at: Date.now(), kind: "engine.installed", actor: "you", summary: `${m[1]}: ${result.ok ? "installed" : "failed"}` });
+      return json(res, 200, result);
     }
 
     // ── engines: what you can connect, and how ──

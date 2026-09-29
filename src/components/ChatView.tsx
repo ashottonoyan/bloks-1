@@ -17,6 +17,7 @@ import { Composer } from "./Composer";
 import { TerminalPanel } from "./Terminal";
 import { showTypingDots, windowStart, TRANSCRIPT_WINDOW } from "@/lib/transcript";
 import { useEarlier } from "@/lib/useEarlier";
+import { useLanesInSidebar } from "@/lib/conversationsView";
 import { findHits, splitHighlight, stepHit } from "@/lib/find";
 import { splitBlocks, type TableBlock } from "@/lib/markdownTable";
 import { parseInline, type InlineToken } from "@/lib/inlineMarkdown";
@@ -721,6 +722,7 @@ export function ChatView({ bot }: { bot: Bot }) {
   }, [currentHit, visibleStart]);
 
   const earlier = useEarlier("bot", bot);
+  const lanesInSidebar = useLanesInSidebar();
   const showEarlier = () => {
     preExpand.current = scrollRef.current?.scrollHeight ?? null;
     pinned.current = false;
@@ -806,8 +808,9 @@ export function ChatView({ bot }: { bot: Bot }) {
         </div>
       )}
 
-      {/* Messages */}
-      <TaskStrip
+      {/* Messages. The strip repeats what the sidebar lists when it lists
+          conversations, so it only shows when the sidebar does not. */}
+      {!lanesInSidebar && <TaskStrip
         tasks={bot.tasks ?? []}
         activeId={bot.activeTaskId ?? bot.threadId}
         onSelect={(taskId) => taskId !== bot.activeTaskId && dispatch({ type: "selectTask", botId: bot.id, taskId })}
@@ -822,7 +825,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           dispatch({ type: "closeTask", botId: bot.id, taskId });
         }}
         onRename={(taskId, title) => dispatch({ type: "renameTask", botId: bot.id, taskId, title })}
-      />
+      />}
       {finding && (
         <div className="flex shrink-0 items-center gap-2 border-b bg-background/95 px-4 py-2 md:px-6">
           <Search size={14} className="shrink-0 text-muted-foreground" />

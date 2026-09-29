@@ -39,3 +39,27 @@ export function useConversationsView(): [boolean, (on: boolean) => void] {
   };
   return [on, set];
 }
+
+// Whether the sidebar is listing conversations right now: the view is on,
+// the column is full width, and the window is wide enough to have one.
+// The chat's tab strip only repeats that list, so it steps aside while
+// this holds and comes back whenever the sidebar cannot show them.
+const LANES_EVENT = "bloks:lanes-in-sidebar";
+let lanesShown = false;
+
+export function setLanesInSidebar(on: boolean) {
+  if (on === lanesShown) return;
+  lanesShown = on;
+  window.dispatchEvent(new Event(LANES_EVENT));
+}
+
+export function useLanesInSidebar(): boolean {
+  const [on, setOn] = useState(lanesShown);
+  useEffect(() => {
+    const sync = () => setOn(lanesShown);
+    sync();
+    window.addEventListener(LANES_EVENT, sync);
+    return () => window.removeEventListener(LANES_EVENT, sync);
+  }, []);
+  return on;
+}

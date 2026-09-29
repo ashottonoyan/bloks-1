@@ -97,7 +97,7 @@ function RenameChip({ title, onDone }: { title: string; onDone: (next: string | 
  * worth watching, because a ring at three percent on every chip is
  * decoration.
  */
-function ContextRing({
+export function ContextRing({
   fraction,
   summarised,
   size = 13,
@@ -137,7 +137,7 @@ function ContextRing({
 }
 
 /** Below this a ring says nothing anybody needs. */
-const RING_FROM = 0.25;
+export const RING_FROM = 0.25;
 
 function StateDot({ state }: { state: TaskState }) {
   if (state === "working") {

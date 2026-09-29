@@ -130,6 +130,8 @@ export const NEVER = [
   "/api/providers",
   "/api/custom-endpoints",
   "/api/instances",
+  // installing software and opening Terminal are the person's to start
+  "/api/engines",
   "/api/pair",
   "/api/mcp-servers",
   "/api/ledger",

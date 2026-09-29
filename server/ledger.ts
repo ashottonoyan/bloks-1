@@ -38,6 +38,7 @@ export type LedgerKind =
   | "approval"
   | "agent.created"
   | "approvals.changed"
+  | "engine.installed"
   | "agent.imported"
   | "agent.exported"
   | "agent.archived"

@@ -8,6 +8,7 @@ import PanelLeftOpen from "lucide-react/dist/esm/icons/panel-left-open.mjs";
 import Pin from "lucide-react/dist/esm/icons/pin.mjs";
 import PinOff from "lucide-react/dist/esm/icons/pin-off.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
+import Loader2 from "lucide-react/dist/esm/icons/loader-2.mjs";
 import Archive from "lucide-react/dist/esm/icons/archive.mjs";
 import Puzzle from "lucide-react/dist/esm/icons/puzzle.mjs";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
@@ -33,8 +34,8 @@ import { previewLine } from "@/lib/preview";
 import { inSection, sectionNames, shownInSection } from "@/lib/sections";
 import { useProfileNotes } from "./AboutYou";
 import { useBriefs } from "./BriefPanel";
-import { ConversationRows, SidebarFooter, WaitingRow } from "./SidebarParts";
-import { useConversationsView } from "@/lib/conversationsView";
+import { ConversationRows, LaneRing, SidebarFooter, WaitingRow } from "./SidebarParts";
+import { setLanesInSidebar, useConversationsView } from "@/lib/conversationsView";
 import ListTree from "lucide-react/dist/esm/icons/list-tree.mjs";
 import Sunrise from "lucide-react/dist/esm/icons/sunrise.mjs";
 import {
@@ -322,18 +323,25 @@ function BotListItem({
             {bot.pinned && <Pin size={11} className="shrink-0 text-muted-foreground" />}
             <span className="truncate">{bot.name}</span>
           </span>
-          {!many && single?.state === "needs-you" ? (
-            <span className="shrink-0 text-[11px] text-warning">waiting</span>
-          ) : !many && (bot.busy || single?.state === "working") ? (
-            <span className="shrink-0 text-[11px] text-muted-foreground">working</span>
-          ) : (
-            newest > 0 && (
-              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/80 transition-opacity duration-150 group-hover/agent:opacity-0">
-                {formatWhen(newest)}
-              </span>
-            )
-          )}
-          {!many && bot.unread && <span className="size-1.5 shrink-0 rounded-full bg-brand" />}
+          {/* the trailing state steps aside for the + on hover, all of it,
+              so the two never sit on top of each other */}
+          <span className="flex shrink-0 items-center gap-1.5 transition-opacity duration-150 group-hover/agent:opacity-0">
+            {!many && single && <LaneRing lane={single} />}
+            {!many && single?.state === "needs-you" ? (
+              <span className="text-[11px] text-warning">waiting</span>
+            ) : bot.busy || (!many && single?.state === "working") ? (
+              <Loader2
+                size={12}
+                className="animate-spin text-brand motion-reduce:animate-none"
+                aria-label="working"
+              />
+            ) : (
+              newest > 0 && (
+                <span className="text-[11px] tabular-nums text-muted-foreground/80">{formatWhen(newest)}</span>
+              )
+            )}
+            {!many && bot.unread && <span className="size-1.5 rounded-full bg-brand" />}
+          </span>
         </button>
         {/* a new conversation, from the agent it is with */}
         <button
@@ -384,7 +392,11 @@ function BotListItem({
           >
             {preview(bot)}
           </span>
-          {bot.unread && <span className="size-2 shrink-0 rounded-full bg-brand" />}
+          {bot.busy && !bot.tasks?.some((t) => t.state === "needs-you") ? (
+            <Loader2 size={13} className="shrink-0 animate-spin text-brand motion-reduce:animate-none" aria-label="working" />
+          ) : (
+            bot.unread && <span className="size-2 shrink-0 rounded-full bg-brand" />
+          )}
         </div>
       </div>
     </button>
@@ -572,6 +584,9 @@ export function Sidebar() {
     };
   }, []);
   const rail = choice ?? narrow;
+  useEffect(() => {
+    setLanesInSidebar(conversations && !rail && !mobile);
+  }, [conversations, rail, mobile]);
   const [logoHover, setLogoHover] = useState(false);
   const toggleCollapsed = () => {
     const next = !rail;

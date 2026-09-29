@@ -5,7 +5,6 @@
 import { useCallback, useEffect, useState } from "react";
 import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle.mjs";
 import Check from "lucide-react/dist/esm/icons/check.mjs";
-import Copy from "lucide-react/dist/esm/icons/copy.mjs";
 import Loader2 from "lucide-react/dist/esm/icons/loader-2.mjs";
 import Mic from "lucide-react/dist/esm/icons/mic.mjs";
 import Monitor from "lucide-react/dist/esm/icons/monitor.mjs";
@@ -20,6 +19,7 @@ import { recommendedFor, WORK_TYPES } from "@/lib/recommend";
 import { AGENT_TEMPLATES } from "@/lib/agentTemplates";
 import { ThisComputer, thisComputer } from "@/lib/thisComputer";
 import { ApprovalsChooser, confirmWidening, type ApprovalMode } from "./ApprovalsChooser";
+import { EngineSetupActions } from "./EngineSetup";
 
 type InstanceRow = {
   instanceId: string;
@@ -35,42 +35,26 @@ type InstanceRow = {
 
 const isElectron = navigator.userAgent.includes("Electron");
 
-/** An install command you can take with you. */
-function CommandRow({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={() => {
-        void navigator.clipboard?.writeText(command);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1600);
-      }}
-      className="mt-2 flex w-full items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-left transition-colors duration-150 hover:bg-accent active:scale-[0.99]"
-      title="Copy to clipboard"
-    >
-      <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
-        {command}
-      </code>
-      {copied ? (
-        <Check size={13} className="shrink-0 text-success" />
-      ) : (
-        <Copy size={13} className="shrink-0 text-muted-foreground" />
-      )}
-    </button>
-  );
-}
-
+/** One engine: ready, installed but signed out, or missing, each with
+ * the button that gets it to ready. */
 function EngineRow({
-  ok,
+  kind,
+  name,
+  state,
   title,
   detail,
   command,
+  onChanged,
 }: {
-  ok: boolean;
+  kind: string;
+  name: string;
+  state: "ready" | "signed-out" | "missing";
   title: string;
   detail: string;
   command?: string;
+  onChanged: () => void;
 }) {
+  const ok = state === "ready";
   return (
     <div className="rounded-xl border bg-card p-3.5">
       <div className="flex items-start gap-3">
@@ -85,7 +69,16 @@ function EngineRow({
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium text-foreground">{title}</div>
           <div className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">{detail}</div>
-          {!ok && command && <CommandRow command={command} />}
+          {!ok && (
+            <EngineSetupActions
+              kind={kind}
+              name={name}
+              installed={state === "signed-out"}
+              signedOut={state === "signed-out"}
+              fallback={command}
+              onChanged={onChanged}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -287,21 +280,21 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     {
       kind: "claudeAgent",
       name: "Claude Code",
-      command: "npm i -g @anthropic-ai/claude-code",
+      command: "curl -fsSL https://claude.ai/install.sh | bash",
       have: "Installed and ready to power agents.",
-      want: "Not found. Install it, then this turns green on its own.",
+      want: "Not installed yet. Install it here; it turns green on its own.",
     },
     {
       kind: "codex",
       name: "Codex",
-      command: "npm i -g @openai/codex",
+      command: "npm i -g --prefix ~/.local @openai/codex",
       have: "Installed. Agents can run on Codex too.",
       want: "Optional. Adds a second engine your agents can use.",
     },
     {
       kind: "pi",
       name: "Pi",
-      command: "npm i -g --ignore-scripts @earendil-works/pi-coding-agent && npm i -g pi-acp",
+      command: "npm i -g --prefix ~/.local --ignore-scripts @earendil-works/pi-coding-agent pi-acp",
       have: "Installed. Agents can run on Pi too.",
       want: "Optional. Install Pi and pi-acp to add a tool-running engine.",
     },
@@ -328,7 +321,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     },
   ];
 
-  const ready = instances?.some((i) => i.snapshot.state === "available") ?? false;
+  // signed out is not ready: it installs green and then fails the first
+  // message, which is the setup problem this screen exists to catch
+  const ready =
+    instances?.some((i) => i.snapshot.state === "available" && i.snapshot.authenticated !== false) ?? false;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background p-4">
@@ -392,19 +388,29 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                   <div className="-mr-1 flex max-h-[264px] flex-col gap-2 overflow-y-auto pr-1">
                     {ENGINES.map((engine) => {
                       const found = byKind(engine.kind);
-                      const ok = found?.snapshot.state === "available";
+                      const installed = found?.snapshot.state === "available";
+                      const state = !installed ? "missing" : found?.snapshot.authenticated === false ? "signed-out" : "ready";
                       return (
                         <EngineRow
                           key={engine.kind}
-                          ok={ok}
+                          kind={engine.kind}
+                          name={engine.name}
+                          state={state}
                           title={
                             engine.name +
-                            (ok && found?.snapshot.version
+                            (installed && found?.snapshot.version
                               ? ` · ${found.snapshot.version.split(" ")[0]}`
                               : "")
                           }
-                          detail={ok ? engine.have : engine.want}
+                          detail={
+                            state === "ready"
+                              ? engine.have
+                              : state === "signed-out"
+                                ? "Installed, but not signed in yet, so it cannot answer. One step left."
+                                : engine.want
+                          }
                           command={engine.command}
+                          onChanged={() => void checkEngines()}
                         />
                       );
                     })}
@@ -430,7 +436,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 Check again
               </button>
               {instances && !ready && (
-                <span className="text-[12px] text-warning">No engine yet, agents can't reply</span>
+                <span className="text-[12px] text-warning">No engine ready yet, agents can't reply</span>
               )}
             </div>
 

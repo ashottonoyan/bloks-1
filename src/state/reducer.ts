@@ -493,6 +493,7 @@ export type Action =
   | { type: "restoreBot"; botId: string }
   | { type: "duplicateBot"; botId: string }
   | { type: "markUnread"; botId: string }
+  | { type: "markLaneUnread"; botId: string; taskId: string }
   | { type: "botPatched"; bot: Partial<Bot> & { id: string } }
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
@@ -805,6 +806,12 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot(state, action.botId, (b) => ({ ...b, hidden: false, archivedAt: null }));
     case "markUnread":
       return updateBot(state, action.botId, (b) => ({ ...b, unread: true }));
+    case "markLaneUnread":
+      return updateBot(state, action.botId, (b) => ({
+        ...b,
+        unread: true,
+        tasks: b.tasks?.map((t) => (t.id === action.taskId ? { ...t, unread: true } : t)),
+      }));
     case "botPatched": {
       // A whole record for an agent we have never seen is a new agent, not
       // a patch: an agent a lead just hired shows up this way.

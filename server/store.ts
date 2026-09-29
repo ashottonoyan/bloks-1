@@ -177,6 +177,9 @@ export interface TaskRecord {
   id: ThreadId;
   title: string;
   busy?: boolean;
+  /** The General opened in place of a closed last conversation. A new
+   * conversation replaces it while it is still empty. */
+  placeholder?: boolean;
   /** Something landed here that nobody has read. Per lane, so opening an
    * agent can go to the conversation that pinged you rather than the one
    * you last had open; the agent's own flag is "any of these". */
@@ -618,7 +621,11 @@ export class Store {
     const task = bot?.tasks.find((t) => t.id === taskId);
     if (!bot || !task) return "missing";
     if (task.busy) return "busy";
-    if (bot.tasks.length <= 1) this.createTask(botId, "General");
+    if (bot.tasks.length <= 1) {
+      const fresh = this.createTask(botId, "General");
+      // a stand-in, so a conversation started next can take its place
+      if (fresh) fresh.placeholder = true;
+    }
     bot.tasks = bot.tasks.filter((t) => t.id !== taskId);
     this.messages.delete(task.id);
     try {

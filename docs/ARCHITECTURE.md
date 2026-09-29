@@ -324,3 +324,16 @@ anything in that mode. A shared room never gets `fullAccess`.
   returned to the client.
 - Approval requests block the turn. The driver holds the provider's
   request open until `respondToRequest` resolves it.
+
+## Engine setup
+
+`server/engine-setup.ts` installs an engine CLI when the person presses
+Install, and opens Terminal at its sign-in when they press Sign in. Installs
+run through the person's login shell, so they see the same node and PATH
+their Terminal does, and write only under `~/.local`: the native installer
+for Claude Code, `npm install -g --prefix "$HOME/.local"` for the npm ones.
+A failure comes back as the next step (install Node, check the network)
+with the installer's own output behind a disclosure. The routes answer
+only a window on this computer and never an agent. Claude Code and Codex
+report signed in or not (`claude auth status`, `codex login status`), and
+the first-run check counts an engine as ready only when it is both.

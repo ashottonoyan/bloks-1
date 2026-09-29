@@ -40,6 +40,7 @@ const LABEL: Record<string, string> = {
   approval: "Approval",
   "agent.created": "Agent made",
   "approvals.changed": "Approvals changed",
+  "engine.installed": "Engine installed",
   "agent.imported": "Agent brought in",
   "agent.exported": "Agent exported",
   "agent.archived": "Agent archived",

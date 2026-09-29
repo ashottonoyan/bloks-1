@@ -65,9 +65,11 @@ conversations, one topic each. Turn on **Show conversations** and they
 are listed under their agent in the sidebar, each with its own unread
 dot and whether it is working or waiting on you. Opening an agent goes
 to the conversation that pinged you, and a row at the top of the
-sidebar says when anything at all is waiting on you. Double-click a
-conversation's tab to rename it; close the last one and a fresh one
-takes its place.
+sidebar says when anything at all is waiting on you. With the list in
+the sidebar the tabs above the chat step aside; right-click a
+conversation to rename it, mark it unread, copy its ID or close it.
+Close the last one and a fresh one takes its place until you start the
+next.
 
 <p align="center">
   <img alt="The sidebar with each agent's conversations listed under it, one of them unread" src="docs/screenshots/conversations.png" width="720">
@@ -265,10 +267,16 @@ desktop shell and computer use; the browser app runs anywhere Node does.
 
 You need one of these before an agent can reply. Any of them works.
 
+The first-run check, and Settings, Engines, install Claude Code, Codex,
+Pi, Antigravity and the Grok CLI with one button. They go into your own
+`~/.local`, so no admin password and no npm permission errors, and an
+engine that is installed but not signed in says so, with a button that
+opens Terminal at its sign-in. To do it by hand instead:
+
 | Engine | How you connect | Runs tools |
 | --- | --- | --- |
-| Claude Code | `npm i -g @anthropic-ai/claude-code`, then `claude` | yes |
-| Codex | `npm i -g @openai/codex`, then `codex login` | yes |
+| Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash`, then `claude` | yes |
+| Codex | `npm i -g --prefix ~/.local @openai/codex`, then `codex login` | yes |
 | Gemini CLI | `npm i -g @google/gemini-cli`, then a Google sign-in or a Gemini key | yes |
 | Pi | `npm i -g --ignore-scripts @earendil-works/pi-coding-agent && npm i -g pi-acp`, then `pi` (or `pi-acp --terminal-login`) | yes |
 | OpenRouter | Sign in from Settings, in your browser | no |

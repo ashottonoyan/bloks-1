@@ -497,7 +497,7 @@ describe("agents", () => {
 
     // and the notice has to be readable, not an errno
     assert.ok(/not installed/i.test(failed.text), failed.text);
-    assert.ok(/npm i -g/.test(failed.text), "it should say how to fix it");
+    assert.ok(/install\.sh|npm i -g/.test(failed.text), "it should say how to fix it");
     assert.ok(!/ENOENT|spawn /.test(failed.text), `errno leaked: ${failed.text}`);
   });
 
@@ -2354,6 +2354,34 @@ describe("task lanes", () => {
     assert.equal(fresh.activeTaskId, fresh.tasks[0].id);
     assert.equal(fresh.threadId, fresh.tasks[0].id);
     assert.deepEqual(fresh.messages, [], "the new lane starts empty");
+  });
+
+  test("a new conversation replaces the blank General that closing the last one left", async () => {
+    // the state the test above leaves: one fresh, empty General
+    const { bots } = await h.json("/api/bots");
+    const stand = bots.find((b: any) => b.id === botId).tasks;
+    assert.equal(stand.length, 1);
+    const { bot } = await h.json(`/api/bots/${botId}/tasks`, { method: "POST", body: JSON.stringify({ title: "Real work" }) });
+    assert.deepEqual(
+      bot.tasks.map((t: any) => t.title),
+      ["Real work"],
+      "the empty stand-in stayed listed beside the new conversation",
+    );
+    // an ordinary new lane is left alone: only the stand-in is replaced
+    const { bot: two } = await h.json(`/api/bots/${botId}/tasks`, { method: "POST", body: JSON.stringify({ title: "Second" }) });
+    assert.equal(two.tasks.length, 2);
+  });
+
+  test("one conversation can be marked unread from its own menu", async () => {
+    const { bots } = await h.json("/api/bots");
+    const bot = bots.find((b: any) => b.id === botId);
+    const other = bot.tasks.find((t: any) => t.id !== bot.activeTaskId);
+    const res = await h.fetch(`/api/bots/${botId}/tasks/${other.id}`, { method: "PATCH", body: JSON.stringify({ unread: true }) });
+    assert.equal(res.status, 200);
+    const { bot: after } = await res.json();
+    assert.equal(after.tasks.find((t: any) => t.id === other.id).unread, true);
+    assert.equal(after.unread, true, "the agent's dot follows its conversations");
+    assert.ok(!after.tasks.find((t: any) => t.id === bot.activeTaskId).unread, "only that conversation");
   });
 
   test("unread is per lane: opening one reads it, and the agent stays unread while another waits", async () => {

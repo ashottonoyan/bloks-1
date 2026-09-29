@@ -575,7 +575,7 @@ export const ACP_SPECS: readonly AcpSpec[] = [
     name: "OpenCode",
     command: "opencode",
     args: ["acp"],
-    install: "npm i -g opencode-ai",
+    install: "npm i -g --prefix ~/.local opencode-ai",
     signIn: "run `opencode auth login` to connect a provider",
     // it manages its own provider credentials; nothing of ours to pass
     authFiles: [".local/share/opencode/auth.json"],
@@ -627,7 +627,7 @@ export const ACP_SPECS: readonly AcpSpec[] = [
     name: "Gemini CLI",
     command: "gemini",
     args: ["--acp"],
-    install: "npm i -g @google/gemini-cli",
+    install: "npm i -g --prefix ~/.local @google/gemini-cli",
     signIn: "connect a Gemini key in Settings or run `gemini` to sign in with Google",
     // if a Gemini key is connected in Bloks the CLI picks it up, so one
     // credential covers both the chat engine and the agent
@@ -655,7 +655,7 @@ export const ACP_SPECS: readonly AcpSpec[] = [
     // pi serves whatever providers its own settings connect, so the
     // catalog is pi's, not ours to guess
     probeModels: true,
-    install: "npm i -g --ignore-scripts @earendil-works/pi-coding-agent && npm i -g pi-acp",
+    install: "npm i -g --prefix ~/.local --ignore-scripts @earendil-works/pi-coding-agent pi-acp",
     signIn: "run `pi` (or `pi-acp --terminal-login`) and configure providers/login",
     // credentials live in Pi; nothing of ours to pass
     authFiles: [".pi/agent/auth.json"],

@@ -525,7 +525,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           message: describeSpawnError(error, {
             name: "Claude Code",
             command: config.cli,
-            install: "npm i -g @anthropic-ai/claude-code",
+            install: "curl -fsSL https://claude.ai/install.sh | bash",
             signIn: "run `claude` once to sign in",
           }),
         });

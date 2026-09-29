@@ -310,3 +310,15 @@ test("a page of earlier messages lands above, once, and only on the lane it was 
   const moved = reducer(state, { ...page, threadId: "t-other" });
   assert.equal(moved.bots[0].messages.length, 2);
 });
+
+test("marking one conversation unread lights it and its agent, and nothing else", () => {
+  const lanes = [
+    { id: "l1", title: "One", state: "idle" as const, createdAt: 1 },
+    { id: "l2", title: "Two", state: "idle" as const, createdAt: 2 },
+  ];
+  const state = withState({ bots: [bot("a", { tasks: lanes })] });
+  const next = reducer(state, { type: "markLaneUnread", botId: "a", taskId: "l2" });
+  const a = next.bots[0];
+  assert.equal(a.unread, true);
+  assert.deepEqual(a.tasks?.map((t) => Boolean(t.unread)), [false, true]);
+});

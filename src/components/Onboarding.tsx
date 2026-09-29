@@ -175,24 +175,65 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   /** Everything already here is worth keeping unless somebody says
    * otherwise, so this moves it aside rather than deleting it: the
-   * folder is renamed with a timestamp and can be renamed back. */
-  const startFresh = () => {
+   * folder is renamed with a timestamp and can be renamed back.
+   *
+   * The server ends itself once the folder is moved, because it still
+   * holds the old workspace in memory. The desktop app relaunches to
+   * start a fresh one; in a browser, the page waits for the server to
+   * come back (a supervisor restarts it) and then loads the new one. */
+  const [resetNote, setResetNote] = useState<string | null>(null);
+  const startFresh = async () => {
     if (
       !window.confirm(
-        "Move your existing agents and conversations aside and start fresh?\n\nNothing is deleted: everything is kept in a timestamped folder next to it, and the app will reload.",
+        "Start fresh?\n\nYour agents, rooms and conversations are moved into a timestamped folder beside this one, and nothing is deleted. Your keys, engines and Bloks Cloud stay set up. Bloks restarts to finish.",
       )
     ) {
       return;
     }
     setResetting(true);
-    void fetch("/api/workspace/reset", { method: "POST" })
-      .then(() => {
-        // the harness reseeds itself on the next boot; a reload is the
-        // shortest honest way to land in that fresh workspace
-        localStorage.removeItem("bloks-setup-done");
+    setResetNote(null);
+    const before = await fetch("/api/health")
+      .then((r) => r.json())
+      .then((h) => h?.pid ?? null)
+      .catch(() => null);
+    const res = await fetch("/api/workspace/reset", { method: "POST" }).catch(() => null);
+    if (!res?.ok) {
+      const body = await res?.json().catch(() => null);
+      setResetting(false);
+      setResetNote(`That didn't work: ${body?.error ?? "Bloks could not move the workspace aside"}. Nothing was changed.`);
+      return;
+    }
+    // what this browser remembered about the old workspace goes with it
+    for (const key of [
+      "bloks-setup-done",
+      "bloks-selected",
+      "bloks-folded-sections",
+      "bloks-intro-plugins",
+      "bloks-project",
+      "bloks-room-lens",
+    ]) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        /* private mode */
+      }
+    }
+    if (window.bloks?.relaunch) {
+      await window.bloks.relaunch();
+      return;
+    }
+    for (let waited = 0; waited < 30_000; waited += 1000) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const pid = await fetch("/api/health")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((h) => h?.pid ?? null)
+        .catch(() => null);
+      if (pid && pid !== before) {
         location.reload();
-      })
-      .catch(() => setResetting(false));
+        return;
+      }
+    }
+    setResetNote("Your old workspace is moved aside. Restart Bloks to open the fresh one.");
   };
 
   const checkEngines = useCallback(() => {
@@ -358,14 +399,18 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               <Button onClick={() => setPrior(null)} disabled={resetting}>
                 Continue where I left off
               </Button>
-              <Button variant="secondary" onClick={startFresh} disabled={resetting}>
-                {resetting ? "Setting up…" : "Start fresh"}
+              <Button variant="secondary" onClick={() => void startFresh()} disabled={resetting}>
+                {resetting ? "Starting fresh…" : "Start fresh"}
               </Button>
             </div>
-            <p className="mt-3 text-center text-[12px] leading-relaxed text-muted-foreground">
-              Starting fresh keeps the old workspace in a timestamped folder beside this one.
-              Nothing is deleted.
-            </p>
+            {resetNote ? (
+              <p className="mt-3 text-center text-[12px] leading-relaxed text-warning">{resetNote}</p>
+            ) : (
+              <p className="mt-3 text-center text-[12px] leading-relaxed text-muted-foreground">
+                Starting fresh keeps the old workspace in a timestamped folder beside this one.
+                Nothing is deleted, and your keys and engines stay set up.
+              </p>
+            )}
           </div>
         ) : step === 0 ? (
           <div className="flex flex-col">

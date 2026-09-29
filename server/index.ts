@@ -6605,13 +6605,36 @@ const server = createServer(async (req, res) => {
     // moved aside with a timestamp, so a person who chose wrong can put
     // it back by renaming one folder. The harness then reseeds itself on
     // the next boot the way a first install does.
+    //
+    // That boot has to actually happen. This process still holds the old
+    // agents, rooms and settings in memory, so answering and carrying on
+    // served the old workspace straight back to the page, and the next
+    // save wrote it into the new folder. So the process ends as soon as
+    // the answer is out: the desktop app relaunches, and a server under a
+    // supervisor comes back on its own.
+    //
+    // Settings are not the workspace. Keys, engine connections and Bloks
+    // Cloud carry over, so starting fresh does not mean setting up the
+    // machine again; only the mark that setup was done is left behind.
     if (method === "POST" && path === "/api/workspace/reset") {
       if (!local) return json(res, 403, { error: "not from here" });
       try {
         const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
         const archive = `${DATA_DIR}-archived-${stamp}`;
         renameSync(DATA_DIR, archive);
-        return json(res, 200, { archivedTo: archive });
+        mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+        try {
+          const kept = JSON.parse(readFileSync(join(archive, "config.json"), "utf8"));
+          delete kept.setupDoneAt;
+          // your own phones stay paired; guests' devices belonged to rooms
+          // that are now in the archive, so they stay there with them
+          if (kept.remote) delete kept.remote.memberDevices;
+          writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify(kept, null, 2), { mode: 0o600 });
+        } catch {
+          /* no settings yet: the fresh workspace starts with none either */
+        }
+        res.on("finish", () => setTimeout(() => process.exit(0), 50));
+        return json(res, 200, { archivedTo: archive, restarting: true });
       } catch (e) {
         return json(res, 500, {
           error: redactSecrets(e instanceof Error ? e.message : String(e)).slice(0, 200),

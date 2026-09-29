@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import { EngineReport } from "./EngineReport";
-import { EngineSetupActions } from "./EngineSetup";
+import { EngineSetupActions, EngineUpdateNote } from "./EngineSetup";
 
 const AUTH_NOTE: Record<ProviderRow["auth"], string> = {
   oauth: "Browser sign-in",
@@ -199,6 +199,9 @@ function EngineRow({ provider }: { provider: ProviderRow }) {
             ? `No sign-in detected. ${provider.signInHint ?? provider.keyHint}`
             : provider.keyHint}
         </div>
+      )}
+      {provider.auth === "cli" && provider.connected && (
+        <EngineUpdateNote kind={provider.kind} name={provider.name} className="ml-10 mt-2" />
       )}
       {error && <div className="mt-1.5 pl-10 text-[12px] text-destructive">{error}</div>}
     </div>

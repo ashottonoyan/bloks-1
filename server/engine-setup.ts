@@ -87,6 +87,12 @@ function loginShell(): string {
 export function installEngine(kind: string): Promise<InstallResult> {
   const setup = ENGINE_SETUP[kind];
   if (!setup) return Promise.resolve({ ok: false, problem: "Bloks does not know how to install that one.", log: "" });
+  return runSetupScript(setup.install);
+}
+
+/** Run one install or update script through the login shell, and say how
+ * it went in terms of what to do next. */
+export function runSetupScript(script: string): Promise<InstallResult> {
   if (process.platform === "win32") {
     return Promise.resolve({
       ok: false,
@@ -96,7 +102,7 @@ export function installEngine(kind: string): Promise<InstallResult> {
   }
   return new Promise((resolve) => {
     let log = "";
-    const child = spawn(loginShell(), ["-lc", setup.install], {
+    const child = spawn(loginShell(), ["-lc", script], {
       env: { ...process.env, CI: "1", NONINTERACTIVE: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });

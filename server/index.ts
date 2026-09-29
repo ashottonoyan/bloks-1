@@ -13,7 +13,8 @@ import { extname, join, resolve, sep } from "node:path";
 import * as attachments from "./attachments.ts";
 import * as box from "./box.ts";
 import * as diagnostics from "./diagnostics.ts";
-import { ENGINE_SETUP, installEngine, openSignIn } from "./engine-setup.ts";
+import { ENGINE_SETUP, installEngine, openSignIn, runSetupScript } from "./engine-setup.ts";
+import { ENGINE_PACKAGES, engineUpdates } from "./engine-updates.ts";
 import * as scout from "./scout.ts";
 import {
   ArtifactCommentStore,
@@ -837,6 +838,27 @@ function closeMemberStreams(personId: string) {
 let frameSeq = 0;
 const RING_SIZE = 512;
 const frameRing: Array<{ seq: number; frame: string; payload: unknown }> = [];
+
+/** Look for engine releases on a schedule, so the news is waiting in the
+ * model list rather than found by someone wondering where a model went.
+ * Soon after start, then every six hours; the check itself is cached. */
+async function checkEngineUpdates() {
+  try {
+    const described = await registry.describe();
+    const updates = await engineUpdates(
+      described.map((d) => ({
+        driverKind: d.driverKind,
+        version: d.snapshot.version ?? null,
+        available: d.snapshot.state === "available",
+      })),
+    );
+    broadcast({ kind: "engineUpdates", updates });
+  } catch {
+    /* next time */
+  }
+}
+setTimeout(() => void checkEngineUpdates(), 20_000).unref?.();
+setInterval(() => void checkEngineUpdates(), 6 * 60 * 60_000).unref?.();
 
 function broadcast(payload: unknown) {
   // a channel that cannot be reached must never cost the room its frame
@@ -7537,6 +7559,39 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && path === "/api/engines/setup") {
       if (!local || asAgent) return json(res, 403, { error: "not from here" });
       return json(res, 200, { setup: ENGINE_SETUP, platform: process.platform });
+    }
+    // Engines with a newer release than the one installed: the reason a
+    // model everyone is talking about is missing from the list. Checked
+    // against npm at most every six hours (server/engine-updates.ts).
+    if (method === "GET" && path === "/api/engines/updates") {
+      if (asAgent) return json(res, 403, { error: "not from here" });
+      const described = await registry.describe();
+      const updates = await engineUpdates(
+        described.map((d) => ({
+          driverKind: d.driverKind,
+          version: d.snapshot.version ?? null,
+          available: d.snapshot.state === "available",
+        })),
+      );
+      return json(res, 200, { updates, canUpdate: local });
+    }
+    m = path.match(/^\/api\/engines\/([\w-]+)\/update$/);
+    if (m && method === "POST") {
+      if (!local || asAgent) return json(res, 403, { error: "not from here" });
+      const known = ENGINE_PACKAGES[m[1]];
+      if (!known) return json(res, 404, { error: "no such engine" });
+      const result = await runSetupScript(known.update);
+      record({ at: Date.now(), kind: "engine.installed", actor: "you", summary: `${m[1]}: ${result.ok ? "updated" : "update failed"}` });
+      // A new CLI brings new models, but the engines read their model
+      // lists when they are built. Rebuilding ends turns in flight, so it
+      // waits for a moment when nothing is running.
+      let reloaded = false;
+      if (result.ok && !store.bots.some((b) => b.busy || b.tasks.some((t) => t.busy))) {
+        await reloadProviders();
+        broadcast({ kind: "providers", ...(await providerCatalog()) });
+        reloaded = true;
+      }
+      return json(res, 200, { ...result, reloaded });
     }
     m = path.match(/^\/api\/engines\/([\w-]+)\/(install|signin)$/);
     if (m && method === "POST") {

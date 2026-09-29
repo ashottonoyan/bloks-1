@@ -398,6 +398,9 @@ export interface AppState {
   bots: Bot[];
   bloks: Blok[];
   instances: InstanceInfo[];
+  /** Engines with a newer release than the one installed, by driver kind.
+   * Why a new model can be missing from the list. */
+  engineUpdates: Record<string, { installed: string; latest: string }>;
   providers: ProviderRow[];
   config: ConfigStatus | null;
   selectedId: string;
@@ -469,6 +472,7 @@ export type Action =
   | { type: "toggleNewRoom"; open?: boolean }
   | { type: "openTeamLink"; slug: string | null }
   | { type: "instances"; instances: InstanceInfo[] }
+  | { type: "engineUpdates"; updates: Record<string, { installed: string; latest: string }> }
   | { type: "providers"; providers: ProviderRow[] }
   | { type: "connectProvider"; kind: string; key?: string; url?: string }
   | { type: "disconnectProvider"; kind: string }
@@ -709,6 +713,8 @@ export function reducer(state: AppState, action: Action): AppState {
       }
       return { ...state, projectId: action.id };
     }
+    case "engineUpdates":
+      return { ...state, engineUpdates: action.updates };
     case "instances":
       return { ...state, instances: action.instances };
     case "providers":
@@ -986,6 +992,7 @@ export const initialState: AppState = {
   bots: [],
   bloks: [],
   instances: [],
+  engineUpdates: {},
   providers: [],
   config: null,
   selectedId: readSelected(),

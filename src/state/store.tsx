@@ -463,6 +463,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/providers")
         .then(({ providers }) => alive && rawDispatch({ type: "providers", providers }))
         .catch(() => {});
+      api("/api/engines/updates")
+        .then(({ updates }) => alive && updates && rawDispatch({ type: "engineUpdates", updates }))
+        .catch(() => {});
       api("/api/config")
         .then((config) => alive && rawDispatch({ type: "configStatus", config }))
         .catch(() => {});
@@ -596,6 +599,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "instances":
           if (Array.isArray(frame.instances)) rawDispatch({ type: "instances", instances: frame.instances });
+          break;
+        // the server looks for engine releases on its own schedule
+        case "engineUpdates":
+          if (frame.updates && typeof frame.updates === "object") {
+            rawDispatch({ type: "engineUpdates", updates: frame.updates });
+          }
           break;
         case "bot.deleted":
           rawDispatch({ type: "deleteBot", botId: frame.botId });

@@ -14,6 +14,7 @@ import Loader2 from "lucide-react/dist/esm/icons/loader-2.mjs";
 import LogIn from "lucide-react/dist/esm/icons/log-in.mjs";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { api, useStore } from "@/state/store";
 
 type SetupTable = Record<string, { install: string; signIn?: string }>;
 
@@ -200,4 +201,71 @@ export function EngineSetupActions({
     );
   }
   return null;
+}
+
+/**
+ * A newer release of an engine than the one installed, and a way to get
+ * it. Said where models are chosen, because a missing new model is the
+ * symptom people notice, and an old CLI is nearly always the cause.
+ * Updating runs on the computer Bloks is on, so other windows say where
+ * to do it instead of offering a button that cannot work from there.
+ */
+export function EngineUpdateNote({ kind, name, className }: { kind: string; name: string; className?: string }) {
+  const { state, dispatch } = useStore();
+  const update = state.engineUpdates[kind];
+  const [local, setLocal] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void loadSetup().then((s) => alive && setLocal(Boolean(s)));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (!update) return null;
+  const run = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await fetch(`/api/engines/${kind}/update`, { method: "POST" });
+      const result = await res.json();
+      if (!result.ok) {
+        setNote(result.problem ?? `${name} did not update.`);
+      } else if (!result.reloaded) {
+        setNote(`Updated. The new models appear once the agents working now have finished.`);
+      }
+      const [{ updates }, { instances }] = await Promise.all([api("/api/engines/updates"), api("/api/instances")]);
+      if (updates) dispatch({ type: "engineUpdates", updates });
+      if (instances) dispatch({ type: "instances", instances });
+    } catch {
+      setNote("Bloks could not start the update.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={cn("rounded-lg bg-brand-soft px-2.5 py-2 text-[11.5px] leading-relaxed text-foreground", className)}>
+      <div>
+        <span className="font-medium">
+          {name} {update.latest} is out.
+        </span>{" "}
+        <span className="text-muted-foreground">
+          You have {update.installed}, so newer models may be missing here.
+        </span>
+      </div>
+      {local ? (
+        <Button size="sm" variant="secondary" className="mt-1.5 h-6 px-2 text-[11.5px]" disabled={busy} onClick={() => void run()}>
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+          {busy ? "Updating…" : `Update ${name}`}
+        </Button>
+      ) : (
+        <div className="mt-1 text-muted-foreground">Update it on the computer Bloks runs on.</div>
+      )}
+      {note && <div className="mt-1 text-muted-foreground">{note}</div>}
+    </div>
+  );
 }

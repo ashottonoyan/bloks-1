@@ -7,12 +7,16 @@
 // Engines that are not usable stay visible and disabled, carrying the
 // reason. Hiding them would leave someone wondering where their engine
 // went, when what they need to know is that it is installed but signed
-// out.
+// out. The same goes for an engine with a newer release: a model that is
+// not in the list is usually a CLI that is out of date, so the list says
+// so, and the corner of it opens the engine settings.
 import { useEffect, useRef, useState } from "react";
 import Check from "lucide-react/dist/esm/icons/check.mjs";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
+import SettingsIcon from "lucide-react/dist/esm/icons/settings-2.mjs";
 import { useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import { ProviderMark } from "./ProviderIcons";
+import { EngineUpdateNote } from "./EngineSetup";
 import { cn } from "@/lib/cn";
 
 function modelLabel(instance: InstanceInfo | undefined, model: string): string {
@@ -99,7 +103,17 @@ export function ModelPicker({
         className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12.5px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground active:scale-[0.98]"
         title={active ? `${active.displayName} · ${modelLabel(active, effectiveModel(active, selection.model))}` : selection.model}
       >
-        {active && <ProviderMark driverKind={active.driverKind} size={13} />}
+        {active && (
+          <span className="relative flex">
+            <ProviderMark driverKind={active.driverKind} size={13} />
+            {state.engineUpdates[active.driverKind] && (
+              <span
+                className="absolute -right-1 -top-1 size-1.5 rounded-full bg-brand ring-2 ring-background"
+                aria-label="update available"
+              />
+            )}
+          </span>
+        )}
         <span className="max-w-[140px] truncate">
           {active || !custom ? modelLabel(active, effectiveModel(active, selection.model)) : (noneLabel ?? "None")}
         </span>
@@ -109,8 +123,9 @@ export function ModelPicker({
       {open && (
         <div
           data-model-picker-content
-          className="absolute right-0 top-full z-30 mt-1.5 flex w-[300px] max-w-[92vw] origin-top-right animate-pop-in overflow-hidden rounded-xl border bg-popover shadow-lg shadow-(color:--shadow-color)"
+          className="absolute right-0 top-full z-30 mt-1.5 flex w-[300px] max-w-[92vw] origin-top-right animate-pop-in flex-col overflow-hidden rounded-xl border bg-popover shadow-lg shadow-(color:--shadow-color)"
         >
+          <div className="flex min-h-0">
           {/* instance rail */}
           <div className="flex flex-col gap-0.5 border-r bg-muted/40 p-1.5">
             {[...instances].sort(byUsable).map((instance) => {
@@ -131,7 +146,12 @@ export function ModelPicker({
                     unavailable && "opacity-40",
                   )}
                 >
-                  <ProviderMark driverKind={instance.driverKind} size={16} />
+                  <span className="relative flex">
+                    <ProviderMark driverKind={instance.driverKind} size={16} />
+                    {state.engineUpdates[instance.driverKind] && (
+                      <span className="absolute -right-1 -top-1 size-1.5 rounded-full bg-brand ring-2 ring-muted" />
+                    )}
+                  </span>
                 </button>
               );
             })}
@@ -170,6 +190,7 @@ export function ModelPicker({
                       ? (railInstance.snapshot.version ?? "ready")
                       : (railInstance.snapshot.reason ?? "unavailable")}
                   </div>
+                  <EngineUpdateNote kind={railInstance.driverKind} name={railInstance.displayName} className="mt-1.5" />
                 </div>
                 {railInstance.models.options.map((option) => {
                   const current =
@@ -208,6 +229,25 @@ export function ModelPicker({
               </div>
             )}
           </div>
+          </div>
+          {/* the way to everything this list cannot do: connect an engine,
+              sign in, update, add a key */}
+          {!custom && (
+            <div className="flex justify-end border-t px-1.5 py-1">
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  dispatch({ type: "toggleAppSettings", open: true, page: "engines" });
+                }}
+                title="Engine settings"
+                aria-label="Engine settings"
+                className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground active:scale-95"
+              >
+                <SettingsIcon size={13} />
+                Engines
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

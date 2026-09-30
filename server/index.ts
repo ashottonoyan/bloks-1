@@ -5710,6 +5710,14 @@ const server = createServer(async (req, res) => {
   const viaRelay = relayDeviceFor(req);
   // Loopback is not a boundary in a browser, see server/http-guard.ts.
   const local = viaRelay ? false : isLocalRequest(req);
+  // A credential that was sent but is not one this server knows (a turn's
+  // token after the turn, a typo, an empty header) is refused rather than
+  // read as no credential: whoever sent it meant to be someone in
+  // particular, and it is not the person at the keyboard.
+  if (local && !asAgent && req.headers.authorization !== undefined && !deviceForToken(bearerToken(req))) {
+    res.setHeader("www-authenticate", 'Bearer error="invalid_token"');
+    return json(res, 401, { error: "this request's credential is not recognized. It may have expired or been revoked." });
+  }
   if (!local && !viaRelay) {
     // Everything below this point is the remote surface, and it only
     // exists once somebody has switched pairing on.

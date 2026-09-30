@@ -7,6 +7,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -4586,9 +4587,9 @@ describe("the command line an agent drives", () => {
     const res = await h.fetch("/api/agent/whoami");
     assert.equal(res.status, 401);
     const madeUp = await h.fetch("/api/bots", { headers: { authorization: "Bearer blk_not-a-real-token" } });
-    // an unknown bearer is simply not an agent; the request is judged as
-    // whatever else it is, which from this origin is the user
-    assert.equal(madeUp.status, 200);
+    // an unknown bearer is not the user either: somebody meant to be
+    // somebody in particular, and this server does not know who
+    assert.equal(madeUp.status, 401);
   });
 
   test("the CLI answers JSON, and says so without a credential", async () => {
@@ -4628,37 +4629,37 @@ describe("the command line an agent drives", () => {
     // without a credential the guard is not involved at all
     assert.equal((await h.fetch("/api/config")).status, 200);
 
-    // and with a made-up one, nothing changes: an unknown bearer is not
-    // an agent, so this is still the person at the keyboard
+    // and a made-up one is refused, not read as the person at the keyboard
     const pretend = await h.fetch("/api/config", {
       headers: { authorization: "Bearer blk_pretend" },
     });
-    assert.equal(pretend.status, 200);
+    assert.equal(pretend.status, 401);
 
     await h.fetch(`/api/bots/${bot.id}?forget=1`, { method: "DELETE" });
   });
 
-  test("the CLI lists only the agents and rooms that are not archived", async () => {
+  test("the CLI lists only the agents and rooms that are not archived", async (t) => {
     const { execFile } = await import("node:child_process");
-    // an unknown bearer from this machine is the person, which is enough
-    // to read the list the command prints
+    // set up as the person, then list as an agent would: the command
+    // needs a credential, and only a turn's own is one
+    const { h2, token } = await heldTurn(t);
     const list = (command: string) =>
       new Promise<any[]>((resolve) => {
         execFile(
           process.execPath,
           [cli, command],
-          { env: { ...process.env, BLOKS_URL: h.url, BLOKS_TOKEN: "blk_pretend" } },
+          { env: { ...process.env, BLOKS_URL: h2.url, BLOKS_TOKEN: token } },
           (_error, stdout) => resolve(JSON.parse(stdout || "[]")),
         );
       });
-    const { bot: live } = await h.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Live" }) });
-    const { bot: retired } = await h.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Retired" }) });
+    const { bot: live } = await h2.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Live" }) });
+    const { bot: retired } = await h2.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Retired" }) });
     const room = (name: string) =>
-      h.json("/api/bloks", { method: "POST", body: JSON.stringify({ name, memberIds: [live.id, retired.id] }) });
+      h2.json("/api/bloks", { method: "POST", body: JSON.stringify({ name, memberIds: [live.id, retired.id] }) });
     const { blok: open } = await room("Open room");
     const { blok: shelved } = await room("Shelved room");
-    await h.json(`/api/bots/${retired.id}`, { method: "DELETE" });
-    await h.json(`/api/bloks/${shelved.id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
+    await h2.json(`/api/bots/${retired.id}`, { method: "DELETE" });
+    await h2.json(`/api/bloks/${shelved.id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
 
     const ids = (await list("agents")).map((a) => a.id);
     assert.ok(ids.includes(live.id), "a working agent is missing");
@@ -4666,11 +4667,6 @@ describe("the command line an agent drives", () => {
     const roomIds = (await list("rooms")).map((r) => r.id);
     assert.ok(roomIds.includes(open.id), "an open room is missing");
     assert.ok(!roomIds.includes(shelved.id), "an archived room is listed as if it were open");
-
-    await h.fetch(`/api/bloks/${open.id}`, { method: "DELETE" });
-    await h.fetch(`/api/bloks/${shelved.id}`, { method: "DELETE" });
-    await h.fetch(`/api/bots/${live.id}?forget=1`, { method: "DELETE" });
-    await h.fetch(`/api/bots/${retired.id}?forget=1`, { method: "DELETE" });
   });
 
   test("an agent renames the conversation it is in, and only its own", async (t) => {
@@ -5505,5 +5501,255 @@ describe("a held agent whose lane is also busy", () => {
 
     await h.json(`/api/bots/${bot.id}/wheel`, { method: "DELETE" });
     await h.fetch(`/api/bots/${bot.id}?forget=1`, { method: "DELETE" });
+  });
+});
+
+// ── a credential this server does not know ─────────────────────────────
+
+/** One request written byte for byte, for headers fetch() will not send
+ * as given: an empty one, two of the same, a stray carriage return. An
+ * event stream is answered as soon as its head arrives. */
+function raw(
+  url: string,
+  method: string,
+  path: string,
+  headers: string[],
+  body?: string,
+): Promise<{ status: number; headers: string; body: string }> {
+  const { hostname, port, host } = new URL(url);
+  const lines = [
+    `${method} ${path} HTTP/1.1`,
+    `Host: ${host}`,
+    "Origin: http://localhost:5199",
+    "Connection: close",
+    ...(body === undefined ? [] : ["Content-Type: application/json", `Content-Length: ${Buffer.byteLength(body)}`]),
+    ...headers,
+  ];
+  return new Promise((resolve, reject) => {
+    let data = "";
+    const done = () => {
+      const split = data.indexOf("\r\n\r\n");
+      const head = split === -1 ? data : data.slice(0, split);
+      let rest = split === -1 ? "" : data.slice(split + 4);
+      if (/^transfer-encoding: chunked/im.test(head)) {
+        let joined = "";
+        for (let size = parseInt(rest, 16); size > 0; size = parseInt(rest, 16)) {
+          const start = rest.indexOf("\r\n") + 2;
+          joined += rest.slice(start, start + size);
+          rest = rest.slice(start + size + 2);
+        }
+        rest = joined;
+      }
+      resolve({ status: Number(/^HTTP\/1\.1 (\d{3})/.exec(head)?.[1] ?? 0), headers: head, body: rest });
+    };
+    const socket = connect(Number(port), hostname, () => socket.write(`${lines.join("\r\n")}\r\n\r\n${body ?? ""}`));
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      data += chunk;
+      if (/^content-type: text\/event-stream/im.test(data) && data.includes("\r\n\r\n")) {
+        socket.destroy();
+        done();
+      }
+    });
+    socket.on("end", done);
+    socket.on("error", reject);
+  });
+}
+
+/** A real turn held open by a stand-in engine, so a test can use the
+ * credential that turn was given for as long as it needs, then end it. */
+async function heldTurn(t: { after: (fn: () => unknown) => void }) {
+  const home = mkdtempSync(join(tmpdir(), "bloks-held-"));
+  const tokenFile = join(home, "token");
+  const release = join(home, "release");
+  const fake = join(home, "fake-claude.mjs");
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
+import { existsSync, writeFileSync } from "node:fs";
+const [first] = process.argv.slice(2);
+if (first === "--version") { console.log("9.9.9 (Claude Code)"); process.exit(0); }
+if (first === "auth") { console.log(JSON.stringify({ loggedIn: true })); process.exit(0); }
+process.stdin.resume();
+process.stdin.on("end", async () => {
+  writeFileSync(${JSON.stringify(tokenFile)}, process.env.BLOKS_TOKEN ?? "");
+  for (let i = 0; i < 1200 && !existsSync(${JSON.stringify(release)}); i++) await new Promise((r) => setTimeout(r, 50));
+  console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "done" }));
+});
+`,
+    { mode: 0o755 },
+  );
+  mkdirSync(join(home, ".bloks"), { recursive: true });
+  writeFileSync(
+    join(home, ".bloks", "config.json"),
+    JSON.stringify({ instances: { claude: { driver: "claudeAgent", config: { cli: fake } } } }),
+  );
+  const h2 = await startHarness({ HOME: home });
+  t.after(async () => {
+    writeFileSync(release, "");
+    await h2.stop();
+    rmSync(home, { recursive: true, force: true });
+  });
+  const { bot } = await h2.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Holder" }) });
+  await h2.fetch(`/api/bots/${bot.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } }),
+  });
+  await h2.fetch(`/api/bots/${bot.id}/messages`, { method: "POST", body: JSON.stringify({ text: "go" }) });
+  let token = "";
+  for (let i = 0; i < 200 && !token; i++) {
+    if (existsSync(tokenFile)) token = readFileSync(tokenFile, "utf8");
+    else await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.match(token, /^blk_/, "the stand-in engine never got a credential");
+  const whoami = () => raw(h2.url, "GET", "/api/agent/whoami", [`Authorization: Bearer ${token}`]);
+  return {
+    h2,
+    bot,
+    token,
+    /** Let the turn finish, and wait until its credential is spent. */
+    async end() {
+      writeFileSync(release, "");
+      for (let i = 0; i < 200 && (await whoami()).status !== 401; i++) await new Promise((r) => setTimeout(r, 50));
+    },
+  };
+}
+
+describe("a credential this server does not know", () => {
+  const REFUSAL = { error: "this request's credential is not recognized. It may have expired or been revoked." };
+
+  test("sent but unknown is refused, whatever its shape, and is never the person", async () => {
+    const madeUp = "blk_made-up-but-token-shaped-0123456789";
+    const shapes = [
+      "Authorization: ",
+      "Authorization: Bearer",
+      "Authorization: Bearer    ",
+      "Authorization: Basic dXNlcjpwYXNz",
+      "Authorization: blk_no-scheme-at-all",
+      `Authorization: Bearer ${madeUp}`,
+    ];
+    const agents = async () => (await h.json("/api/bots")).bots.length;
+    const before = await agents();
+    for (const shape of shapes) {
+      for (const path of ["/api/telegram", "/api/config", "/api/bots"]) {
+        assert.equal((await raw(h.url, "GET", path, [shape])).status, 401, `${JSON.stringify(shape)} on ${path}`);
+      }
+      const made = await raw(h.url, "POST", "/api/bots", [shape], JSON.stringify({ name: "Should not exist" }));
+      assert.equal(made.status, 401, `${JSON.stringify(shape)} made an agent`);
+      assert.match(made.headers, /^www-authenticate: Bearer error="invalid_token"$/im);
+      assert.deepEqual(JSON.parse(made.body), REFUSAL);
+    }
+    assert.equal(await agents(), before, "a refused request left something behind");
+
+    // with no credential at all, the person at the keyboard is still that
+    assert.equal((await raw(h.url, "GET", "/api/telegram", [])).status, 200);
+
+    // and a refusal repeats nothing it was sent, in the answer or the log
+    for (const part of [madeUp, "dXNlcjpwYXNz", "blk_no-scheme-at-all"]) {
+      assert.ok(!h.logs().includes(part), `the log holds ${part}`);
+    }
+  });
+
+  test("a query string or a cookie is not a credential, and the streams follow the same rule", async () => {
+    // ignored exactly as before: nothing reads a credential from either
+    const q = await raw(h.url, "GET", "/api/telegram?token=blk_made-up&access_token=blk_made-up&key=blk_made-up", [
+      "Cookie: token=blk_made-up; session=blk_made-up",
+    ]);
+    assert.equal(q.status, 200);
+
+    const { bots } = await h.json("/api/bots");
+    const terminal = `/api/bots/${bots[0].id}/terminal/stream`;
+    for (const path of ["/api/events", terminal]) {
+      assert.equal((await raw(h.url, "GET", path, ["Authorization: Bearer blk_made-up"])).status, 401, path);
+    }
+    // and without one, as today
+    assert.equal((await raw(h.url, "GET", "/api/events", [])).status, 200);
+    assert.equal((await raw(h.url, "GET", terminal, [])).status, 409);
+  });
+
+  test("a webhook is its own credential, even when its sender adds another", async () => {
+    const { bots } = await h.json("/api/bots");
+    const { webhook } = await h.json("/api/webhooks", {
+      method: "POST",
+      body: JSON.stringify({ name: "Chatty sender", botId: bots[0].id }),
+    });
+    const fired = await raw(h.url, "POST", `/hook/${webhook.token}`, ["Authorization: Bearer whatever-the-sender-sends"], "{}");
+    assert.equal(fired.status, 202);
+    await h.fetch(`/api/webhooks/${webhook.id}`, { method: "DELETE" });
+  });
+
+  test("a paired device's token works on this machine as before, until the device is removed", async () => {
+    await h.fetch("/api/pair", { method: "PUT", body: JSON.stringify({ enabled: true }) });
+    const started = await h.json("/api/pair/start", { method: "POST" });
+    const claimed = await h.json("/api/pair/claim", {
+      method: "POST",
+      body: JSON.stringify({ credential: started.token, device: "test phone" }),
+    });
+    const withDevice = () => raw(h.url, "GET", "/api/bots", [`Authorization: Bearer ${claimed.token}`]);
+    assert.equal((await withDevice()).status, 200);
+    await h.fetch(`/api/pair/devices/${claimed.device.id}`, { method: "DELETE" });
+    assert.equal((await withDevice()).status, 401);
+    await h.fetch("/api/pair", { method: "PUT", body: JSON.stringify({ enabled: false }) });
+  });
+
+  test("a turn's own credential: what works today still works, and nothing near it is the person", async (t) => {
+    const { h2, bot, token, end } = await heldTurn(t);
+    const as = (auth: string[], path = "/api/agent/whoami", method = "GET", body?: string) =>
+      raw(h2.url, method, path, auth, body);
+
+    // exactly as bin/bloks.mjs sends it, and still narrowed to an agent
+    assert.equal((await as([`Authorization: Bearer ${token}`])).status, 200);
+    assert.equal((await as([`Authorization: Bearer ${token}`], "/api/telegram")).status, 403);
+
+    // near misses bearerToken already forgives: still the agent
+    for (const near of [`Bearer  ${token}`, `bearer ${token}`, `Bearer ${token} `]) {
+      assert.equal((await as([`Authorization: ${near}`])).status, 200, JSON.stringify(near));
+      assert.equal((await as([`Authorization: ${near}`], "/api/telegram")).status, 403, JSON.stringify(near));
+    }
+    // a stray carriage return never reaches the guard: the parser refuses it
+    assert.equal((await as([`Authorization: Bearer ${token}\r`], "/api/telegram")).status, 400);
+
+    // two of them: the first one counts, and the second is dropped
+    const junk = "Authorization: Bearer blk_junk";
+    const valid = `Authorization: Bearer ${token}`;
+    assert.equal((await as([valid, junk])).status, 200);
+    assert.equal((await as([valid, junk], "/api/telegram")).status, 403);
+    assert.equal((await as([junk, valid])).status, 401);
+    assert.equal((await as([junk, valid], "/api/telegram")).status, 401);
+
+    // a refused request costs the turn nothing: its whole budget is left
+    const note = JSON.stringify({ text: "a note" });
+    for (let i = 0; i < 5; i++) {
+      assert.equal((await as([junk, valid], `/api/bots/${bot.id}/memory`, "PUT", note)).status, 401);
+    }
+    for (let i = 0; i < 12; i++) {
+      assert.equal((await as([valid], `/api/bots/${bot.id}/memory`, "PUT", note)).status, 200, `write ${i + 1}`);
+    }
+    assert.equal((await as([valid], `/api/bots/${bot.id}/memory`, "PUT", note)).status, 429);
+
+    // after the turn, the same credential is refused rather than promoted
+    await end();
+    const count = async () => (await h2.json("/api/bots")).bots.length;
+    const before = await count();
+    assert.equal((await as([valid], "/api/telegram")).status, 401);
+    assert.equal((await as([valid], "/api/bots", "POST", JSON.stringify({ name: "Late" }))).status, 401);
+    assert.equal(await count(), before);
+
+    // and the command line says so in words
+    const { execFile } = await import("node:child_process");
+    const cli = fileURLToPath(new URL("../bin/bloks.mjs", import.meta.url));
+    for (const credential of [token, "blk_made-up"]) {
+      const said = await new Promise<{ code: number; out: any }>((resolve) =>
+        execFile(
+          process.execPath,
+          [cli, "whoami"],
+          { env: { ...process.env, BLOKS_URL: h2.url, BLOKS_TOKEN: credential } },
+          (error, stdout) => resolve({ code: error ? ((error as any).code ?? 1) : 0, out: JSON.parse(stdout || "{}") }),
+        ),
+      );
+      assert.equal(said.code, 1);
+      assert.equal(said.out.error, REFUSAL.error);
+    }
+    assert.ok(!h2.logs().includes(token.slice(4)), "the log holds the credential");
   });
 });

@@ -12,15 +12,29 @@
 // It talks to the Bloks running on this machine, over the same local API
 // the app uses, and finds it on the ports the app listens on. Nothing
 // else: no network, no dependencies, no state of its own.
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const PORTS = [8799, 18799, 28799];
 const PROTOCOL = "2025-06-18";
 let base = process.env.BLOKS_URL || null;
 
+/** The port the running server wrote down, first: when the usual ports
+ * are taken the app listens somewhere else. */
+function writtenPort() {
+  try {
+    const port = Number(readFileSync(join(homedir(), ".bloks", "port"), "utf8").trim());
+    return Number.isInteger(port) && port > 0 ? [port] : [];
+  } catch {
+    return [];
+  }
+}
+
 async function findBloks() {
   if (base) return base;
-  for (const port of PORTS) {
+  for (const port of [...new Set([...writtenPort(), ...PORTS])]) {
     const url = `http://127.0.0.1:${port}`;
     try {
       const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1500) });

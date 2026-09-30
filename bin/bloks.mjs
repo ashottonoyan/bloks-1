@@ -9,7 +9,19 @@
 // It reads its credential from the environment, which is where the turn
 // put it. Nothing is stored, nothing is cached, and there is no login: a
 // credential that outlives its turn would be a credential worth stealing.
-const BASE = process.env.BLOKS_URL || "http://127.0.0.1:8799";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+// the running server writes its port down, and it is not always 8799
+const writtenPort = (() => {
+  try {
+    return readFileSync(join(homedir(), ".bloks", "port"), "utf8").trim();
+  } catch {
+    return "";
+  }
+})();
+const BASE = process.env.BLOKS_URL || `http://127.0.0.1:${/^\d+$/.test(writtenPort) ? writtenPort : "8799"}`;
 const TOKEN = process.env.BLOKS_TOKEN || "";
 
 /** Everything this understands, and what each one is for. */

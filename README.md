@@ -263,6 +263,14 @@ dev:desktop` in a third terminal.
 **Requirements:** Node 22+, pnpm, and at least one engine. macOS for the
 desktop shell and computer use; the browser app runs anywhere Node does.
 
+**Ports:** the app listens on 8799 on this machine. If something else has
+it, the desktop app moves to 18799, 28799, or any free port, and remembers
+the one that worked so a paired phone keeps finding it. To choose one
+yourself, add `"port": 9123` to `~/.bloks/config.json`, or set
+`BLOKS_PORT=9123` when starting `bloks-server` or the app from a terminal.
+When no port works, the app says which ports it tried and what is holding
+each.
+
 ## Getting an engine
 
 You need one of these before an agent can reply. Any of them works.

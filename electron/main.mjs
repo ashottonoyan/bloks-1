@@ -46,6 +46,7 @@ import electronUpdater from "./vendor/electron-updater.cjs";
 
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
 import { nativeHelper } from "./native-helper.mjs";
+import { USUAL_PORTS, anyFreePort, failurePage, parseLsof, portFree, portOrder } from "./ports.mjs";
 import { startMeeting, startSpeech, stopMeeting, stopSpeech } from "./speech.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -55,9 +56,9 @@ const APP_ICON = path.join(HERE, "resources/app-icon.png");
 // can resolve to ::1 first, which paints an empty window.
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 
-/** Ports to try, in order. A stray process on the usual one should cost a
- * few seconds, not the whole app. */
-const CANDIDATE_PORTS = [8799, 18799, 28799];
+/** The usual ports; see electron/ports.mjs for the order they are tried
+ * in and what happens when none of them is free. */
+const CANDIDATE_PORTS = USUAL_PORTS;
 
 const DARK_BACKDROP = "#0e0e10";
 const LIGHT_BACKDROP = "#ffffff";
@@ -175,7 +176,14 @@ async function startServerOn(port) {
       BLOKS_STATIC_DIR: path.join(process.resourcesPath, "ui"),
       BLOKS_PORT: String(port),
     },
-    stdio: "inherit",
+    // stderr is read as well as passed on, so a server that dies while
+    // starting can say why on the page instead of "ports"
+    stdio: ["ignore", "inherit", "pipe"],
+  });
+  let stderr = "";
+  child.stderr?.on("data", (chunk) => {
+    process.stderr.write(chunk);
+    stderr = (stderr + chunk.toString()).slice(-4000);
   });
 
   let exited = false;
@@ -185,13 +193,18 @@ async function startServerOn(port) {
 
   // First run on a fresh machine writes its data directories before it
   // listens, so this waits rather than assuming a fast start.
+  let why = "slow";
   for (let attempt = 0; attempt < 40; attempt++) {
-    if (exited) return null;
+    if (exited) {
+      // lost a race for the port after the check said it was free
+      return { child: null, why: /EADDRINUSE/.test(stderr) ? "busy" : "exited", stderr };
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/health`);
       if (response.ok) {
         const body = await response.json().catch(() => null);
-        if (body?.app === "bloks" && body.pid === child.pid && body.static) return child;
+        if (body?.app === "bloks" && body.pid === child.pid && body.static) return { child };
+        why = "other-server";
         break; // someone else answers here; try the next port
       }
     } catch {
@@ -205,40 +218,83 @@ async function startServerOn(port) {
   } catch {
     /* already gone */
   }
-  return null;
+  return { child: null, why, stderr };
 }
 
+/** Who is listening on a port, when the system will say. */
+function portHolder(port) {
+  if (process.platform === "win32") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    execFile("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fcp"], { timeout: 3000 }, (_error, stdout) =>
+      resolve(parseLsof(stdout)),
+    );
+  });
+}
+
+const LAST_PORT_FILE = () => path.join(app.getPath("userData"), "server-port.json");
+
+function readLastPort() {
+  try {
+    return JSON.parse(fs.readFileSync(LAST_PORT_FILE(), "utf8")).port ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** A port chosen in ~/.bloks/config.json, the one place a Finder-opened
+ * app can be told one. */
+function readConfiguredPort() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(os.homedir(), ".bloks", "config.json"), "utf8")).port ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** What the window shows when no server came up. Set by startServer. */
+let startupFailure = null;
+
 async function startServer() {
+  const attempts = [];
+  let crash = "";
   // Quit-and-reopen can race the previous instance's teardown, so the
   // whole sweep is tried twice before giving up.
   for (let round = 0; round < 2; round++) {
-    for (const port of CANDIDATE_PORTS) {
-      const child = await startServerOn(port);
-      if (child) {
-        serverProcess = child;
+    const ports = portOrder({ env: process.env.BLOKS_PORT, configured: readConfiguredPort(), last: readLastPort() });
+    // every usual port busy is not the end: any free port will do
+    const spare = await anyFreePort();
+    if (spare) ports.push(spare);
+    for (const port of ports) {
+      if (!(await portFree(port))) {
+        if (round === 1) attempts.push({ port, why: "busy", holder: await portHolder(port) });
+        continue;
+      }
+      const started = await startServerOn(port);
+      if (started.child) {
+        serverProcess = started.child;
         serverPort = port;
+        try {
+          fs.writeFileSync(LAST_PORT_FILE(), JSON.stringify({ port }));
+        } catch {
+          /* next launch simply starts from the usual ports */
+        }
         return true;
       }
+      if (started.why === "exited" && started.stderr) crash = started.stderr;
+      if (round === 1) attempts.push({ port, why: started.why, holder: null });
     }
     await pause(2500);
   }
+  startupFailure = failurePage({
+    attempts,
+    crash,
+    backdrop: DARK_BACKDROP,
+    machine: process.platform === "darwin" ? "Mac" : "computer",
+  });
   return false;
 }
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** Shown when every port was taken. Inline rather than a file, because a
- * failure this early should not depend on anything else having loaded. */
-const STARTUP_FAILURE_PAGE =
-  "data:text/html;charset=utf-8," +
-  encodeURIComponent(
-    `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:${DARK_BACKDROP};color:#ededf0;font:15px -apple-system,system-ui">` +
-      `<div style="text-align:center;max-width:380px">` +
-      `<div style="font-size:42px;color:#7c8aff">▦</div>` +
-      `<h2 style="font-weight:600;margin:12px 0 6px">Couldn't start the Bloks server</h2>` +
-      `<p style="color:#8f8f99;line-height:1.5">Something else is using its ports. Quit and reopen Bloks. If it keeps happening, restart your ${process.platform === "darwin" ? "Mac" : "computer"}.</p>` +
-      `</div></body>`,
-  );
 
 // ── the window ─────────────────────────────────────────────────────────
 
@@ -397,7 +453,7 @@ function appUrl(query = "") {
   const base = app.isPackaged
     ? serverStarted
       ? `http://127.0.0.1:${serverPort}`
-      : STARTUP_FAILURE_PAGE
+      : startupFailure
     : DEV_URL;
   return query ? `${base}${base.includes("?") ? "&" : "?"}${query}` : base;
 }
@@ -565,7 +621,7 @@ function createWindow() {
   win.webContents.on("will-attach-webview", (event) => event.preventDefault());
 
   if (app.isPackaged) {
-    win.loadURL(serverStarted ? `http://127.0.0.1:${serverPort}` : STARTUP_FAILURE_PAGE);
+    win.loadURL(serverStarted ? `http://127.0.0.1:${serverPort}` : startupFailure);
   } else {
     win.loadURL(DEV_URL);
   }

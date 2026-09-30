@@ -271,7 +271,9 @@ import * as workspace from "./workspace.ts";
 import * as speech from "./speech.ts";
 import { speakable } from "./speech-text.ts";
 
-const PORT = Number(process.env.BLOKS_PORT || 8799);
+// BLOKS_PORT first (the desktop app always sets it), then a port chosen in
+// config.json, then the usual one
+const PORT = Number(process.env.BLOKS_PORT || loadConfig().port || 8799);
 const STATIC_DIR = process.env.BLOKS_STATIC_DIR || null;
 const MIME: Record<string, string> = {
   ".html": "text/html",
@@ -10481,8 +10483,30 @@ function redactSecrets(message: string): string {
 // header of server/pairing.ts for why this is not a live toggle.
 const BIND = bindHost();
 noteBound(BIND);
+// A port someone else holds is the one startup failure a person can fix
+// on their own, so it is said plainly instead of as a stack trace. The
+// code stays in the line: the desktop app and the tests read it to know
+// to try another port.
+server.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(
+      `[bloks] port ${PORT} is already in use by another program (EADDRINUSE). ` +
+        `Quit that program, or start Bloks on another port with BLOKS_PORT, for example BLOKS_PORT=${PORT + 1}.`,
+    );
+    process.exit(1);
+  }
+  throw error;
+});
 server.listen(PORT, BIND, () => {
   console.log(`bloks server on http://127.0.0.1:${PORT}`);
+  // Where this server is, for the tools on this machine that look for it
+  // (bin/bloks-mcp.mjs, bin/bloks.mjs). The desktop app can end up on a
+  // port nobody would guess when the usual ones are taken.
+  try {
+    writeFileSync(join(DATA_DIR, "port"), String(PORT));
+  } catch {
+    /* they fall back to the usual ports */
+  }
   if (BIND !== "127.0.0.1") {
     console.log(`[bloks] paired devices may reach this machine on port ${PORT}`);
   }

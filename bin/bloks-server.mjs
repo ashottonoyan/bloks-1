@@ -17,14 +17,31 @@
 //
 // The last three talk to the running server, so run them in a second
 // shell on the same machine.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const PORT = Number(process.env.BLOKS_PORT || 8799);
-const BASE = `http://127.0.0.1:${PORT}`;
+/** Where the server is: BLOKS_PORT, then the port the running server
+ * wrote down, then one chosen in config.json, then the usual one. */
+function knownPort() {
+  const read = (file, pick) => {
+    try {
+      return pick(readFileSync(join(homedir(), ".bloks", file), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const chosen = Number(process.env.BLOKS_PORT) || read("config.json", (text) => Number(JSON.parse(text).port));
+  // starting listens where you chose; everything else talks to wherever
+  // the running server said it is
+  if (command === "start") return chosen || 8799;
+  return chosen || read("port", (text) => Number(text.trim())) || 8799;
+}
 const [command = "start", ...args] = process.argv.slice(2);
+const PORT = knownPort();
+const BASE = `http://127.0.0.1:${PORT}`;
 
 function fail(message) {
   console.error(message);
@@ -77,6 +94,7 @@ switch (command) {
     // Loopback, always: a server on a public machine must not be the one
     // place Bloks listens on the network.
     process.env.BLOKS_LOOPBACK_ONLY = "1";
+    process.env.BLOKS_PORT = String(PORT);
     const ui = join(root, "dist");
     if (!process.env.BLOKS_STATIC_DIR && existsSync(join(ui, "index.html"))) process.env.BLOKS_STATIC_DIR = ui;
     // a checkout runs its source; the packaged download ships only the

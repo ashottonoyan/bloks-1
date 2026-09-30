@@ -44,6 +44,10 @@ export interface CustomEndpoint {
 }
 
 export interface AppConfig {
+  /** The port to listen on when BLOKS_PORT does not say. Chosen by hand,
+   * for a machine where the usual one is taken; the desktop app reads it
+   * too, since an app opened from Finder never sees BLOKS_PORT. */
+  port?: number;
   /** Model providers, keyed by the catalog's driver kind. */
   providers?: Record<string, ProviderConfig>;
   /** Pre-catalog xAI slot. Still read, still written through to

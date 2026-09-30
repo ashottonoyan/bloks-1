@@ -263,6 +263,7 @@ import {
 } from "./watchers.ts";
 import { MemoryJournal } from "./memory-journal.ts";
 import { Rehearsals, type Rehearsal } from "./rehearsals.ts";
+import { RoomTagQueues } from "./room-tags.ts";
 import { summarize, UsageStore } from "./usage.ts";
 import { TeamLibrary } from "./team-library.ts";
 import { GALLERY_MAX_BYTES, GALLERY_URL, parseGallery, parseTeamFile, TeamFileError, teamFromManifest, writeTeamFile, type GalleryTeam } from "./team-file.ts";
@@ -1802,6 +1803,7 @@ bus.subscribe((event: RuntimeEvent) => {
           reply?.text ?? (event.stopReason ?? ""),
         );
       }
+      drainRoomTags(bot.id);
       drainSteer(event.threadId);
       // an agent that named someone else hands the room over to them, and
       // the person who started the chain is still the one who asked
@@ -2218,6 +2220,7 @@ async function startTurn(
   if (task.busy) {
     throw Object.assign(new Error("this task is already running, interrupt it or open another task"), {
       status: 409,
+      busy: true,
     });
   }
 
@@ -2741,6 +2744,7 @@ async function startTurn(
       store.setTaskBusy(task.id, false);
       turnStarted.delete(task.id);
       broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
+      drainRoomTags(bot.id);
       drainSteer(task.id);
     }
   })();
@@ -3404,30 +3408,82 @@ async function postToRoomNow(blok: BlokRecord, text: string, author: RoomAuthor,
     broadcast({ kind: "message", threadId: blok.id, message: notice });
   }
 
+  await dispatchRound(
+    blok.id,
+    targets.map((id) => [id, text] as const),
+    author.hops,
+    requester,
+  );
+  return message;
+}
+
+async function dispatchRound(
+  roomId: string,
+  work: ReadonlyArray<readonly [string, string]>,
+  hops: number,
+  requester?: string,
+) {
   // While this loop runs, handoffs queue instead of firing. Otherwise the
   // lead would be pulled in the moment the first member reported, spend
   // its expensive turn on a third of the work, and get pulled in again for
   // each of the rest.
   const queue = new Map<string, string>();
-  dispatching.set(blok.id, queue);
+  dispatching.set(roomId, queue);
   try {
-    await speakInTurn(
-      blok.id,
-      targets.map((id) => [id, text] as const),
-      author.hops,
-      requester,
-    );
+    await speakInTurn(roomId, work, hops, requester);
     // whoever was named while the room was busy speaks now, and anyone
     // they name in turn goes round again until the chain runs out
     for (let round = 0; round < MAX_AGENT_HOPS && queue.size; round++) {
       const waiting = [...queue];
       queue.clear();
-      await speakInTurn(blok.id, waiting, author.hops + round + 1, requester);
+      await speakInTurn(roomId, waiting, hops + round + 1, requester);
     }
   } finally {
-    dispatching.delete(blok.id);
+    dispatching.delete(roomId);
   }
-  return message;
+}
+
+/** Room lines for agents that were mid-turn (server/room-tags.ts). */
+const roomTags = new RoomTagQueues();
+
+function queueRoomTag(botId: string, roomId: string, text: string, requester?: string) {
+  // where the chain stood when this agent was named, so a delivery later
+  // counts against the same hop limit
+  roomTags.add(botId, roomId, text, requester, agentHops.get(botId) ?? 0);
+}
+
+/** Deliver an agent's waiting room lines once it is free. Called whenever
+ * one of its turns settles. */
+function drainRoomTags(botId: string) {
+  const waiting = roomTags.of(botId);
+  if (!waiting.length) return;
+  const bot = store.bot(botId);
+  // a message queued in one of its own lanes was there first, and its
+  // turn is about to start; the room waits for the settle after it
+  if (bot && [...steerQueues.values()].some((q) => q.botId === botId)) return;
+  for (const entry of waiting) {
+    const { roomId } = entry;
+    const blok = bloks.get(roomId);
+    if (!bot || !blok || !blok.memberIds.includes(botId)) {
+      roomTags.take(botId, entry);
+      continue;
+    }
+    if (blok.sharing ? laneBusy(bot, roomId) : bot.busy) continue;
+    // claimed before any async work, so two racing settles fire it once
+    roomTags.take(botId, entry);
+    const previous = roomPosting.get(roomId);
+    const run = (previous ?? Promise.resolve())
+      .catch(() => {})
+      .then(() => {
+        if (entry.hops) agentHops.set(botId, entry.hops);
+        else agentHops.delete(botId);
+        return dispatchRound(roomId, [[botId, entry.texts.join("\n")]], entry.hops, entry.requester);
+      });
+    roomPosting.set(roomId, run);
+    void run.finally(() => {
+      if (roomPosting.get(roomId) === run) roomPosting.delete(roomId);
+    }).catch(() => {});
+  }
 }
 
 /**
@@ -3446,14 +3502,21 @@ async function speakInTurn(
   // doing elsewhere is no reason to skip it or to wait on it.
   const shared = Boolean(bloks.get(roomId)?.sharing);
   const idleHere = (bot: BotRecord) => (shared ? !laneBusy(bot, roomId) : !bot.busy);
-  const ordered = work
+  const named = work
     .map(([id, text]) => [store.bot(id), text] as const)
-    .filter((entry): entry is readonly [BotRecord, string] => entry[0] !== null && idleHere(entry[0]))
+    .filter((entry): entry is readonly [BotRecord, string] => entry[0] !== null);
+  // a busy agent hears it when its turn ends, rather than never
+  for (const [member, text] of named) if (!idleHere(member)) queueRoomTag(member.id, roomId, text, requester);
+  const ordered = named
+    .filter(([member]) => idleHere(member))
     .sort(([a], [b]) => (a.seniority ?? 1) - (b.seniority ?? 1));
 
   for (const [member, text] of ordered) {
-    // one agent failing must not silence the rest of the room
-    await startTurn(member.id, text, { roomId, hops, requester }).catch((e) => sayTurnedAway(roomId, e));
+    // one agent failing must not silence the rest of the room; one that
+    // got busy while it waited its turn to speak hears it later
+    await startTurn(member.id, text, { roomId, hops, requester }).catch((e) =>
+      (e as { busy?: boolean })?.busy ? queueRoomTag(member.id, roomId, text, requester) : sayTurnedAway(roomId, e),
+    );
     if (shared) await waitForLaneIdle(member.id, roomId);
     else await waitForIdle(member.id);
   }
@@ -3590,8 +3653,14 @@ async function relayMentions(roomId: string, fromBotId: string, text: string, re
       continue;
     }
     const bot = store.bot(target.id);
-    if (!bot || (blok.sharing ? laneBusy(bot, roomId) : bot.busy)) continue;
-    await startTurn(target.id, text, { roomId, hops, requester }).catch((e) => sayTurnedAway(roomId, e));
+    if (!bot) continue;
+    if (blok.sharing ? laneBusy(bot, roomId) : bot.busy) {
+      queueRoomTag(target.id, roomId, text, requester);
+      continue;
+    }
+    await startTurn(target.id, text, { roomId, hops, requester }).catch((e) =>
+      (e as { busy?: boolean })?.busy ? queueRoomTag(target.id, roomId, text, requester) : sayTurnedAway(roomId, e),
+    );
   }
 }
 

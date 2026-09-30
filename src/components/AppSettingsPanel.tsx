@@ -541,7 +541,7 @@ export const SETTINGS_PAGES: Array<{ group: string; pages: SettingsPage[] }> = [
         id: "devices",
         label: "Phone and devices",
         icon: Smartphone,
-        description: "Reach this Mac from your phone and other devices.",
+        description: `Reach ${thisComputer()} from your phone and other devices.`,
         keywords: "iphone pairing remote relay qr",
       },
       {
@@ -562,7 +562,7 @@ export const SETTINGS_PAGES: Array<{ group: string; pages: SettingsPage[] }> = [
         id: "computers",
         label: "Computers",
         icon: Monitor,
-        description: "A private computer agents can work on, on this Mac or in the cloud.",
+        description: `A private computer agents can work on, on ${thisComputer()} or in the cloud.`,
         keywords: "vm virtual machine local box sandbox desktop",
       },
     ],

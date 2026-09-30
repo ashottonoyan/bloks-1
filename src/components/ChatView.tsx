@@ -480,9 +480,8 @@ function LiveBrowser({ botId, frame }: { botId: string; frame: { png: string; mi
 function StreamingBubble({ text }: { text: string }) {
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[82%] rounded-2xl rounded-bl-md bg-muted px-3.5 py-2 text-[14.5px] leading-relaxed text-foreground sm:max-w-[68%]">
+      <div className="streaming-text max-w-[82%] rounded-2xl rounded-bl-md bg-muted px-3.5 py-2 text-[14.5px] leading-relaxed text-foreground sm:max-w-[68%]">
         <Markdownish text={text} />
-        <span className="ml-0.5 inline-block h-[14px] w-[2px] animate-pulse bg-muted-foreground align-middle" />
       </div>
     </div>
   );

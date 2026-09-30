@@ -998,7 +998,7 @@ export function Sidebar() {
                 </div>
               );
             })}
-          {visibleBots.length === 0 && !rail && (
+          {visibleBots.length === 0 && !rail && (query || state.hydrated) && (
             <div className="px-3 py-8 text-center text-[13px] text-muted-foreground">
               {query ? "No agents match" : "No agents yet. Create one with +"}
             </div>

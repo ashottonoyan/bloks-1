@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { MotionConfig } from "motion/react";
 import Loader2 from "lucide-react/dist/esm/icons/loader-2.mjs";
 import { StoreProvider, useStore } from "@/state/store";
+import { Button } from "@/components/ui/button";
 import { Onboarding } from "@/components/Onboarding";
 import { Intro, introPending } from "@/components/Intro";
 import { initAnalytics, setupDone, workspaceSetupDone } from "@/lib/analytics";
@@ -55,14 +56,28 @@ function Shell() {
         <ChatView bot={bot} />
       ) : (
         <main className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
-          <Loader2 size={20} className="animate-spin" />
-          <div className="text-[14px]">
-            {state.connected ? "No agents yet" : "Connecting to the Bloks server…"}
-          </div>
-          {!state.connected && (
-            <div className="text-[12px]">
-              Start it with <code className="rounded bg-muted px-1.5 py-0.5">pnpm dev:server</code>
-            </div>
+          {state.connected && state.hydrated ? (
+            // loaded, and truly empty: the next step, not a spinner that
+            // never stops
+            <>
+              <div className="text-[15px] font-medium text-foreground">No agents yet</div>
+              <div className="max-w-[300px] text-center text-[13px] leading-relaxed">
+                An agent is someone with a job: a researcher, a writer, a chief of staff. Make your first one.
+              </div>
+              <Button onClick={() => dispatch({ type: "toggleNewAgent", open: true })}>New agent</Button>
+            </>
+          ) : (
+            <>
+              <Loader2 size={20} className="animate-spin" />
+              <div className="text-[14px]">{state.connected ? "Loading your agents…" : "Connecting to Bloks…"}</div>
+              {/* a developer hint; someone who installed the app has no
+                  command to run and should not be told one */}
+              {!state.connected && import.meta.env.DEV && (
+                <div className="text-[12px]">
+                  Start it with <code className="rounded bg-muted px-1.5 py-0.5">pnpm dev:server</code>
+                </div>
+              )}
+            </>
           )}
         </main>
       )}

@@ -457,6 +457,9 @@ export interface AppState {
   roomTyping: Record<string, { name: string; at: number }>;
   /** agents whose box is still being stood up, so the panel can say so */
   provisioning: Record<string, boolean>;
+  /** The agent list has arrived at least once. Until then an empty list
+   * means "not loaded yet", not "you have no agents". */
+  hydrated: boolean;
   connected: boolean;
   error: string | null;
 }
@@ -632,7 +635,7 @@ export function reducer(state: AppState, action: Action): AppState {
         : wanted && !action.bots.some((b) => b.id === wanted)
           ? wanted
           : (action.bots.find((b) => !b.hidden)?.id ?? "");
-      return { ...state, bots: action.bots, selectedId };
+      return { ...state, bots: action.bots, selectedId, hydrated: true };
     }
     case "earlierLoaded": {
       const prepend = <T extends { messages: Message[]; olderMessages?: number }>(t: T): T => {
@@ -1036,6 +1039,7 @@ export const initialState: AppState = {
   joinRequests: {},
   roomTyping: {},
   provisioning: {},
+  hydrated: false,
   connected: false,
   error: null,
 };

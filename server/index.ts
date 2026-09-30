@@ -1381,6 +1381,18 @@ bus.subscribe((event: RuntimeEvent) => {
       const byMember = requester !== undefined && requester !== "owner";
       const askedBy = byMember ? people.person(requester!)?.name : undefined;
 
+      // A decision made here (the wheel, a rule, a mode) that could not
+      // reach the agent allowed nothing: the ask it answered is gone. Say
+      // so in the lane rather than record an allow that never happened.
+      const undelivered = (e: unknown) => {
+        pushMessage({
+          role: "bot",
+          kind: "notice",
+          text: `Bloks decided on "${(event.summary || event.tool || "an action").slice(0, 120)}" but could not deliver it (${e instanceof Error ? e.message : String(e)}), so the agent did not get to do it.`,
+        });
+        return false;
+      };
+
       // Rules first, and only what they do not cover reaches a person.
       // Questions are never governed: an agent asking its owner something
       // is not an action, and a rule that answered it would be inventing
@@ -1402,7 +1414,7 @@ bus.subscribe((event: RuntimeEvent) => {
               behavior: "deny",
               message: pausedMessage(hold),
             })
-            .catch(() => {});
+            .catch((e) => undelivered(e));
           pushMessage({
             role: "bot",
             kind: "activity",
@@ -1418,16 +1430,19 @@ bus.subscribe((event: RuntimeEvent) => {
         if (decision.verdict === "deny" || (decision.verdict === "allow" && !byMember)) {
           const allowed = decision.verdict === "allow";
           const instance = laneInstance(bot, event.threadId);
-          void instance?.adapter
-            .respondToRequest(event.threadId, event.requestId, {
-              behavior: allowed ? "allow" : "deny",
-              ...(allowed ? {} : { message: refusal(decision) }),
-            })
-            .catch(() => {});
-          // Written down before the action runs, refusals included, and
-          // signed by the agent it is about. A decision nobody was asked
-          // about is the one most worth being able to look up later.
-          record(
+          const delivered = instance
+            ? instance.adapter
+                .respondToRequest(event.threadId, event.requestId, {
+                  behavior: allowed ? "allow" : "deny",
+                  ...(allowed ? {} : { message: refusal(decision) }),
+                })
+                .then(() => true, (e) => undelivered(e))
+            : Promise.resolve(undelivered(new Error("the engine is gone")));
+          // Written down once the answer has reached the agent, refusals
+          // included, and signed by the agent it is about. A decision
+          // nobody was asked about is the one most worth being able to
+          // look up later, and one that never arrived allowed nothing.
+          void delivered.then((ok) => ok && record(
             signed(bot.id, {
               at: Date.now(),
               kind: "approval",
@@ -1440,7 +1455,7 @@ bus.subscribe((event: RuntimeEvent) => {
                 agent: bot.name,
               },
             }),
-          );
+          ));
           // Said in the lane too, or a refusal is a turn that quietly did
           // less than it was asked to.
           if (!allowed) {
@@ -1469,10 +1484,12 @@ bus.subscribe((event: RuntimeEvent) => {
         );
         if (!byMember && (mode === "auto" || mode === "full" || (mode === "edits" && editish))) {
           const instance = laneInstance(bot, event.threadId);
-          void instance?.adapter
-            .respondToRequest(event.threadId, event.requestId, { behavior: "allow" })
-            .catch(() => {});
-          record(
+          const delivered = instance
+            ? instance.adapter
+                .respondToRequest(event.threadId, event.requestId, { behavior: "allow" })
+                .then(() => true, (e) => undelivered(e))
+            : Promise.resolve(undelivered(new Error("the engine is gone")));
+          void delivered.then((ok) => ok && record(
             signed(bot.id, {
               at: Date.now(),
               kind: "approval",
@@ -1484,7 +1501,7 @@ bus.subscribe((event: RuntimeEvent) => {
                 agent: bot.name,
               },
             }),
-          );
+          ));
           break;
         }
       }

@@ -1378,6 +1378,71 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     assert.match(second[1].text, /429 Too Many Requests/);
   });
 
+  test("a permission asked after its turn ended still gets the answer the log records", async (t) => {
+    // A Claude Code process can work on after its result (a background
+    // task, a subagent) and ask again over the same connection. Auto mode
+    // recorded an allow, but the answer went to a broker that was gone,
+    // and fifteen minutes later the ask was denied by its timeout.
+    const home = mkdtempSync(join(tmpdir(), "bloks-late-ask-"));
+    const log = join(home, "answers.log");
+    const cli = join(home, "fake-claude.mjs");
+    writeFileSync(
+      cli,
+      `#!${process.execPath}
+import { appendFileSync } from "node:fs";
+import { connect } from "node:net";
+const argv = process.argv.slice(2);
+if (argv[0] === "--version") { console.log("9.9.9 (Claude Code)"); process.exit(0); }
+if (argv[0] === "auth") { console.log(JSON.stringify({ loggedIn: true })); process.exit(0); }
+const note = (line) => appendFileSync(${JSON.stringify(log)}, JSON.stringify(line) + "\\n");
+const cfg = JSON.parse(argv[argv.indexOf("--mcp-config") + 1]);
+const socketPath = cfg.mcpServers.bloks.args.at(-1);
+process.stdin.resume();
+process.stdin.on("end", () => {
+  const sock = connect(socketPath);
+  let buf = "";
+  const waiters = new Map();
+  sock.on("data", (d) => {
+    buf += d;
+    for (let i; (i = buf.indexOf("\\n")) !== -1; ) {
+      const f = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+      note({ answer: f.id, behavior: f.behavior });
+      waiters.get(f.id)?.(f);
+    }
+  });
+  const ask = (id) => new Promise((resolve) => {
+    waiters.set(id, resolve);
+    sock.write(JSON.stringify({ t: "ask", id, kind: "permission", tool: "Bash", input: { command: "echo " + id } }) + "\\n");
+  });
+  sock.on("connect", async () => {
+    await ask("during-turn");
+    console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "done for now" }));
+    setTimeout(async () => { await ask("after-turn"); setTimeout(() => process.exit(0), 200); }, 400);
+    setTimeout(() => process.exit(0), 20000);
+  });
+});
+`,
+      { mode: 0o755 },
+    );
+    mkdirSync(join(home, ".bloks"), { recursive: true });
+    writeFileSync(join(home, ".bloks", "config.json"), JSON.stringify({ instances: { claude: { driver: "claudeAgent", config: { cli } } } }));
+    const h2 = await startHarness({ HOME: home });
+    t.after(async () => {
+      await h2.stop();
+      rmSync(home, { recursive: true, force: true });
+    });
+    const { bot } = await h2.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "Background" }) });
+    await h2.fetch(`/api/bots/${bot.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, approvals: "auto" }),
+    });
+    await h2.fetch(`/api/bots/${bot.id}/messages`, { method: "POST", body: JSON.stringify({ text: "start" }) });
+    const answers = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : []);
+    const late = await waitFor(async () => answers().find((a: any) => a.answer === "after-turn") ?? null, 8_000);
+    assert.equal(answers().find((a: any) => a.answer === "during-turn")?.behavior, "allow");
+    assert.equal(late?.behavior, "allow", "the ask made after the turn ended was never answered");
+  });
+
   test("full access takes Claude Code's own prompts off, and every other mode keeps them", async (t) => {
     const home = mkdtempSync(join(tmpdir(), "bloks-full-"));
     const seen = join(home, "argv.json");

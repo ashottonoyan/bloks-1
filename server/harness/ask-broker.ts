@@ -84,6 +84,11 @@ export interface AskBroker {
   /** Deliver a person's decision. False when the id is unknown, which
    * usually means it already timed out. */
   answer(askId: string, behavior: string, message?: string): boolean;
+  /** Stop taking new connections and remove the socket, but keep the
+   * ones already open and their asks. For a turn that has ended while its
+   * process runs on (a background task can still ask), so the next turn's
+   * socket is never confused with this one. */
+  retire(): void;
   /** End the turn: settle anything still open and remove the socket. */
   close(): void;
 }
@@ -105,6 +110,7 @@ export function createAskBroker(options: AskBrokerOptions): AskBroker {
     /* nothing there, which is the normal case */
   }
 
+  let retired = false;
   const server: Server = createServer((connection) => {
     // The proxy going away is ordinary (its CLI exited); the turn's own
     // settle path handles the consequences.
@@ -181,6 +187,20 @@ export function createAskBroker(options: AskBrokerOptions): AskBroker {
       return true;
     },
 
+    retire() {
+      if (retired) return;
+      retired = true;
+      try {
+        server.close();
+      } catch {
+        /* already down */
+      }
+      try {
+        unlinkSync(options.socketPath);
+      } catch {
+        /* already gone */
+      }
+    },
     close() {
       for (const entry of [...open.values()]) {
         if (entry.ask.kind === "question") {
@@ -189,6 +209,8 @@ export function createAskBroker(options: AskBrokerOptions): AskBroker {
           entry.settle("deny", TURN_ENDED_PERMISSION, "shutdown");
         }
       }
+      if (retired) return;
+      retired = true;
       try {
         server.close();
       } catch {

@@ -113,9 +113,12 @@ const RUN_AS_NODE = { ELECTRON_RUN_AS_NODE: "1" };
 
 /** Socket path for a turn's permission bridge. Short and thread-derived:
  * unix socket paths have a length limit that full ids would risk. */
-function brokerSocket(threadId: string) {
+function brokerSocket(threadId: string, turnId: string) {
   const tag = threadId.replace(/[^\w-]/g, "").slice(0, 8);
-  return join(DATA_DIR, `perm-${tag}.sock`);
+  // per turn too: a finished turn's process can outlive it, and its
+  // broker must not share a path with the next turn's
+  const turn = turnId.replace(/[^\w-]/g, "").slice(-6);
+  return join(DATA_DIR, `perm-${tag}-${turn}.sock`);
 }
 
 /** Pull readable text out of a message's content blocks. */
@@ -147,6 +150,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     /** At most one turn per thread. A second send while one is live is a
      * caller bug, not a queue to manage. */
     const running = new Map<string, RunningTurn>();
+    /** Brokers of turns that have ended while their process runs on. A
+     * background task or subagent can still ask for permission after the
+     * result, and its answer has to reach the broker it asked, not the
+     * next turn's (which has never heard of it). Each is closed when its
+     * process exits. */
+    const afterTurn = new Map<string, Set<AskBroker>>();
 
     const emit = (event: RuntimeEvent) => {
       for (const listener of [...listeners]) listener(event);
@@ -299,7 +308,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // to broker. Every other mode gets the bridge.
       let broker: AskBroker | undefined;
       if (!bypass) {
-        const socketPath = brokerSocket(threadId);
+        const socketPath = brokerSocket(threadId, turnId);
         broker = createAskBroker({
           socketPath,
           onAsk: (ask) =>
@@ -368,10 +377,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
 
       let finished = false;
+      let exited = false;
       const finish = (ok: boolean, stopReason: string | null, cost: number | null = null) => {
         if (finished) return;
         finished = true;
-        broker?.close();
+        if (broker && !exited) {
+          broker.retire();
+          const kept = afterTurn.get(threadId) ?? new Set<AskBroker>();
+          kept.add(broker);
+          afterTurn.set(threadId, kept);
+        } else {
+          broker?.close();
+        }
         if (personaDir) {
           try {
             rmSync(personaDir, { recursive: true, force: true });
@@ -538,6 +555,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
 
       child.on("close", (code) => {
+        exited = true;
+        const kept = afterTurn.get(threadId);
+        if (broker && kept?.delete(broker)) {
+          broker.close();
+          if (!kept.size) afterTurn.delete(threadId);
+        }
         if (finished) return;
         // Exiting without a `result` frame means it never got as far as
         // answering, so stderr is the only thing that can explain it.
@@ -632,9 +655,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         interruptTurn: async (threadId) => running.get(threadId)?.abort(),
 
         respondToRequest: async (threadId, requestId, decision) => {
-          const broker = running.get(threadId)?.broker;
-          if (!broker) throw new Error("nothing on this thread is waiting to be answered");
-          if (!broker.answer(requestId, decision.behavior, decision.message)) {
+          // the running turn's broker first, then any finished turn's whose
+          // process is still at work and asked after its result
+          const brokers = [running.get(threadId)?.broker, ...(afterTurn.get(threadId) ?? [])].filter(
+            (b): b is AskBroker => b !== undefined,
+          );
+          if (!brokers.length) throw new Error("nothing on this thread is waiting to be answered");
+          if (!brokers.some((b) => b.answer(requestId, decision.behavior, decision.message))) {
             throw new Error("no such pending request (it may have timed out)");
           }
         },
@@ -643,6 +670,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
         stopAll: async () => {
           for (const turn of running.values()) turn.abort();
+          for (const kept of afterTurn.values()) for (const b of kept) b.close();
+          afterTurn.clear();
         },
 
         onEvent: (listener) => {

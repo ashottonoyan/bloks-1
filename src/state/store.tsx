@@ -55,6 +55,9 @@ const StoreContext = createContext<{
   dispatch: React.Dispatch<Action>;
 } | null>(null);
 
+/** How long a finished turn's streamed text waits for its message. */
+const STREAM_LINGER_MS = 8_000;
+
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, rawDispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
@@ -584,8 +587,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const event = frame.event;
           if (event.type === "content.delta" && event.streamKind === "assistant_text") {
             rawDispatch({ type: "streamDelta", threadId: event.threadId, delta: event.delta });
+          } else if (event.type === "turn.started") {
+            rawDispatch({ type: "turnStarted", threadId: event.threadId });
           } else if (event.type === "turn.completed") {
-            rawDispatch({ type: "streamClear", threadId: event.threadId });
+            // The streamed text stays until its message lands and takes its
+            // place: through the relay the message can come after the end
+            // of the turn, and clearing now left a gap where the reply was.
+            // A turn that ended with no message of its own lets go shortly.
+            rawDispatch({ type: "turnSettled", threadId: event.threadId });
+            const threadId = event.threadId;
+            setTimeout(() => rawDispatch({ type: "streamClear", threadId, onlyIfSettled: true }), STREAM_LINGER_MS);
           }
           break;
         }

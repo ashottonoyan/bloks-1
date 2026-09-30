@@ -113,6 +113,11 @@ const RETRY_MIN_MS = 2_000;
 const RETRY_MAX_MS = 60_000;
 /** The relay drops a link it has not heard from; speak well inside that. */
 const KEEPALIVE_MS = 30_000;
+/** One push's limits, well inside the relay's 2 MB body cap. */
+const BATCH_BYTES = 1_500_000;
+const BATCH_FRAMES = 500;
+/** Pushes held while the line is slow, before the oldest are let go. */
+const OUTBOX_LIMIT = 2_000;
 /** No bytes from the relay for this long means a dead socket the OS has
  * not reported. The relay's own keepalive is every 25s, so 60s is two
  * missed beats. */
@@ -145,6 +150,13 @@ export class RelayLink {
   /** Consecutive failed pushes; enough of them means the line is dead
    * even though its read has not returned yet, so we force a redial. */
   private pushFailures = 0;
+  /** Pushes waiting their turn. They go out one POST at a time, in order:
+   * the relay hands a push's frames on before it answers, so one at a
+   * time keeps a reply's frames in the order they happened all the way
+   * to the phone. Sent all at once, a late delta could land after the
+   * turn ended and the reply showed twice. */
+  private outbox: Array<{ frames: string[]; wake?: unknown }> = [];
+  private pushing = false;
   /** Recent outbound posts, oldest first: true for one that landed. */
   private outbound: boolean[] = [];
   /** Nonces of mutating requests served recently, so a hostile relay
@@ -266,15 +278,44 @@ export class RelayLink {
       typeof wake === "object"
         ? { reason: wake.reason, ...(wake.clients ? { clients: wake.clients } : {}), ...(Object.keys(sealed).length ? { sealed } : {}) }
         : wake;
-    void fetch(`${this.config.url}/space/agent/events`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ frames, ...(sent ? { wake: sent } : {}) }),
-      signal: AbortSignal.timeout(10_000),
-    })
-      .then((res) => res.ok)
-      .catch(() => false)
-      .then((ok) => {
+    this.outbox.push({ frames, ...(sent ? { wake: sent } : {}) });
+    // a dead line is caught by the failures below; until then, the oldest
+    // frames are the ones worth least to a phone that catches up anyway
+    if (this.outbox.length > OUTBOX_LIMIT) this.outbox.splice(0, this.outbox.length - OUTBOX_LIMIT);
+    void this.pump();
+  }
+
+  /** Sends what is waiting, one POST at a time. Whatever piled up while one
+   * was in flight goes as one batch, up to the first push that wakes a
+   * phone (a batch carries one wake). */
+  private async pump() {
+    if (this.pushing) return;
+    this.pushing = true;
+    try {
+      while (this.outbox.length && this.config && this.state.connected) {
+        const frames: string[] = [];
+        let wake: unknown;
+        let bytes = 0;
+        while (this.outbox.length) {
+          const next = this.outbox[0];
+          const size = next.frames.reduce((n, f) => n + f.length, 0);
+          if (frames.length && (bytes + size > BATCH_BYTES || frames.length + next.frames.length > BATCH_FRAMES)) break;
+          this.outbox.shift();
+          frames.push(...next.frames);
+          bytes += size;
+          if (next.wake !== undefined) {
+            wake = next.wake;
+            break;
+          }
+        }
+        const ok = await fetch(`${this.config.url}/space/agent/events`, {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify({ frames, ...(wake !== undefined ? { wake } : {}) }),
+          signal: AbortSignal.timeout(10_000),
+        })
+          .then((res) => res.ok)
+          .catch(() => false);
         // A failed push is a dropped frame, not a broken link on its own.
         // But a run of them means the line is dead while its read still
         // hangs, so force the redial the read has not noticed yet. A line
@@ -282,8 +323,14 @@ export class RelayLink {
         // the health reading is for.
         this.pushFailures = ok ? 0 : this.pushFailures + 1;
         this.noteOutbound(ok);
-        if (this.pushFailures >= 4) this.controller?.abort();
-      });
+        if (this.pushFailures >= 4) {
+          this.outbox = [];
+          this.controller?.abort();
+        }
+      }
+    } finally {
+      this.pushing = false;
+    }
   }
 
   /** A relay token of its own for one member, so removing them later does

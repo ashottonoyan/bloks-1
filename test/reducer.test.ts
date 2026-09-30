@@ -167,6 +167,26 @@ test("streaming text accumulates per thread and clears on its own", () => {
   assert.equal(state.streaming["t-a"], undefined);
 });
 
+test("a finished turn's text stays until its message lands, and a late delta cannot reopen it", () => {
+  // Through the relay the message can arrive after the turn's end, and a
+  // delta after both. Neither may leave a gap or a second copy.
+  let state = withState({ bots: [bot("a")] });
+  state = reducer(state, { type: "turnStarted", threadId: "t-a" });
+  state = reducer(state, { type: "streamDelta", threadId: "t-a", delta: "Hello" });
+  state = reducer(state, { type: "turnSettled", threadId: "t-a" });
+  assert.equal(state.streaming["t-a"], "Hello", "the reply vanished before its message came");
+  state = reducer(state, { type: "messageAdded", threadId: "t-a", message: { ...msg("m1"), role: "bot", kind: "text", text: "Hello" } });
+  assert.equal(state.streaming["t-a"], undefined);
+  state = reducer(state, { type: "streamDelta", threadId: "t-a", delta: "Hello" });
+  assert.equal(state.streaming["t-a"], undefined, "a late delta opened a second copy");
+  // the next turn streams as usual, and a linger timer from the last one
+  // does not cut it off
+  state = reducer(state, { type: "turnStarted", threadId: "t-a" });
+  state = reducer(state, { type: "streamDelta", threadId: "t-a", delta: "Next" });
+  state = reducer(state, { type: "streamClear", threadId: "t-a", onlyIfSettled: true });
+  assert.equal(state.streaming["t-a"], "Next");
+});
+
 test("the reducer never mutates the state it was given", () => {
   const before = withState({ bots: [bot("a")] });
   const snapshot = JSON.stringify(before);

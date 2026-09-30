@@ -447,6 +447,10 @@ export interface AppState {
   projectId: string | null;
   /** in-flight assistant text per threadId (content.delta fold) */
   streaming: Record<string, string>;
+  /** Threads whose turn has ended and no new one begun. A delta for one
+   * of them is late (pushes through the relay can arrive out of order)
+   * and would reopen a finished reply beside its own message. */
+  settledTurns: Record<string, true>;
   /** the most recent picture of each agent's screen */
   screens: Record<string, { png: string; mime: string; source?: "browser" }>;
   /** People in each shared room, by room id. */
@@ -512,7 +516,9 @@ export type Action =
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
   | { type: "streamDelta"; threadId: string; delta: string }
-  | { type: "streamClear"; threadId: string }
+  | { type: "streamClear"; threadId: string; onlyIfSettled?: boolean }
+  | { type: "turnStarted"; threadId: string }
+  | { type: "turnSettled"; threadId: string }
   | { type: "screenFrame"; botId: string; png: string; mime: string; source?: "browser" }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "setModel"; botId: string; selection: ModelSelection }
@@ -890,6 +896,7 @@ export function reducer(state: AppState, action: Action): AppState {
       }));
     }
     case "streamDelta":
+      if (state.settledTurns[action.threadId]) return state;
       return {
         ...state,
         streaming: {
@@ -898,9 +905,18 @@ export function reducer(state: AppState, action: Action): AppState {
         },
       };
     case "streamClear": {
+      if (action.onlyIfSettled && !state.settledTurns[action.threadId]) return state;
+      if (!(action.threadId in state.streaming)) return state;
       const { [action.threadId]: _, ...rest } = state.streaming;
       return { ...state, streaming: rest };
     }
+    case "turnStarted": {
+      if (!state.settledTurns[action.threadId]) return state;
+      const { [action.threadId]: _, ...rest } = state.settledTurns;
+      return { ...state, settledTurns: rest };
+    }
+    case "turnSettled":
+      return { ...state, settledTurns: { ...state.settledTurns, [action.threadId]: true } };
     case "screenFrame":
       return {
         ...state,
@@ -1034,6 +1050,7 @@ export const initialState: AppState = {
     }
   })(),
   streaming: {},
+  settledTurns: {},
   screens: {},
   roomPeople: {},
   joinRequests: {},

@@ -24,6 +24,9 @@ function stubRelay() {
   const resultFaults: Array<number | "drop"> = [];
   const resultAttempts = new Map<string, number>();
   const pushed: Array<{ frames: string[]; wake: string | { reason: string; sealed?: Record<string, string> } | null }> = [];
+  /** How long each push is held before it is answered, and how many were
+   * open at once at most. */
+  const events = { delayMs: 0, open: 0, mostOpen: 0 };
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const path = (req.url ?? "").split("?")[0];
@@ -50,6 +53,15 @@ function stubRelay() {
       }
       if (path === "/space/agent/events") {
         pushed.push({ frames: parsed.frames ?? [], wake: parsed.wake ?? null });
+        if (events.delayMs) {
+          events.open++;
+          events.mostOpen = Math.max(events.mostOpen, events.open);
+          return void setTimeout(() => {
+            events.open--;
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end("{}");
+          }, events.delayMs);
+        }
       }
       res.writeHead(200, { "content-type": "application/json" });
       res.end("{}");
@@ -63,6 +75,7 @@ function stubRelay() {
     resultFaults,
     resultAttempts,
     pushed,
+    events,
     get connected() {
       return send !== null;
     },
@@ -315,6 +328,35 @@ describe("the relay link", () => {
     // a conversation of another agent is not reachable through this one
     const stray = await ask("stray", `/api/bots/${bot.id}/messages?thread=not-a-lane`);
     assert.equal(stray.status, 404);
+  });
+
+  test("pushes go out one at a time, in the order they happened", async () => {
+    // Sent all at once, a slow relay could deliver a reply's late delta
+    // after the turn ended, and the phone showed the reply twice. The
+    // relay hands a push's frames on before it answers, so one open push
+    // at a time keeps the order all the way to the phone.
+    const { bot } = await h.json("/api/bots", { method: "POST", body: JSON.stringify({ name: "n-start" }) });
+    relay.pushed.length = 0;
+    relay.events.delayMs = 60;
+    relay.events.mostOpen = 0;
+    try {
+      for (let i = 0; i < 12; i++) {
+        await h.fetch(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ name: `n-${String(i).padStart(2, "0")}` }) });
+      }
+      const names = () =>
+        relay.pushed
+          .flatMap((p) => p.frames)
+          .map((f) => open(openKey, peek(f)!) as any)
+          .filter((f) => f?.kind === "bot" && f.bot?.id === bot.id && /^n-\d+$/.test(f.bot.name ?? ""))
+          .map((f) => f.bot.name as string);
+      const all = await waitUntil(() => (names().includes("n-11") ? names() : undefined));
+      assert.ok(all, "the last rename never reached the relay");
+      assert.deepEqual(all, [...all!].sort(), "frames reached the relay out of order");
+      assert.equal(relay.events.mostOpen, 1, "more than one push was open at once");
+      assert.ok(relay.pushed.some((p) => p.frames.length > 1), "what waited behind a slow push did not go as one batch");
+    } finally {
+      relay.events.delayMs = 0;
+    }
   });
 
   test("broadcasts go out sealed, and only an approval asks for a buzz, with its words sealed too", async (t) => {

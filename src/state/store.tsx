@@ -60,6 +60,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  /** The sequence of the last bot frame applied for each agent. An answer
+   * to a conversation action carries the sequence it was built at; one
+   * older than a frame already shown would put an older record back (a
+   * rename from elsewhere undone by a slow answer), so only its
+   * conversation's messages are taken. */
+  const botSeq = useRef(new Map<string, number>());
+  const adoptAnswer = (r: { bot?: Bot; seq?: number }) => {
+    if (!r?.bot) return;
+    const seen = botSeq.current.get(r.bot.id);
+    if (typeof r.seq !== "number" || seen === undefined || seen <= r.seq) {
+      rawDispatch({ type: "botPatched", bot: r.bot });
+      return;
+    }
+    const shown = stateRef.current.bots.find((b) => b.id === r.bot!.id);
+    if (shown && shown.activeTaskId === r.bot.activeTaskId) {
+      rawDispatch({
+        type: "botPatched",
+        bot: { id: r.bot.id, messages: r.bot.messages, olderMessages: r.bot.olderMessages } as Partial<Bot> & { id: string },
+      });
+    }
+  };
+
   // Text fields save as you type, so edits are coalesced per agent
   // rather than sending a request per keystroke.
   const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: Record<string, unknown> }>());
@@ -264,17 +286,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "newTask":
           api(`/api/bots/${action.botId}/tasks`, { method: "POST", body: "{}" })
-            .then((r) => r.bot && rawDispatch({ type: "botPatched", bot: r.bot }))
+            .then(adoptAnswer)
             .catch(showError);
           break;
         case "selectTask":
           api(`/api/bots/${action.botId}/tasks/${action.taskId}/activate`, { method: "POST" })
-            .then((r) => r.bot && rawDispatch({ type: "botPatched", bot: r.bot }))
+            .then(adoptAnswer)
             .catch(showError);
           break;
         case "closeTask":
           api(`/api/bots/${action.botId}/tasks/${action.taskId}`, { method: "DELETE" })
-            .then((r) => r.bot && rawDispatch({ type: "botPatched", bot: r.bot }))
+            .then(adoptAnswer)
             .catch(showError);
           break;
         case "renameTask":
@@ -282,7 +304,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             method: "PATCH",
             body: JSON.stringify({ title: action.title }),
           })
-            .then((r) => r.bot && rawDispatch({ type: "botPatched", bot: r.bot }))
+            .then(adoptAnswer)
             .catch(showError);
           break;
         case "sendToRoom":
@@ -312,7 +334,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const pinged = action.lane ? (action.lane === open ? null : action.lane) : pingedLane(bot);
           if (pinged) {
             api(`/api/bots/${bot.id}/tasks/${pinged}/activate`, { method: "POST" })
-              .then((r) => r.bot && rawDispatch({ type: "botPatched", bot: r.bot }))
+              .then(adoptAnswer)
               .catch(showError);
           } else if (openLaneUnread(bot)) {
             api(`/api/bots/${action.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) }).catch(() => {});
@@ -507,7 +529,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // is news: a laptop opened after an hour should not fire an
           // hour of banners.
           replayUntil.current = typeof frame._seq === "number" ? frame._seq : 0;
-          if (!frame.resumed) loadAll();
+          if (!frame.resumed) {
+            // a server that could not resume may have restarted and begun
+            // counting again, so its sequences say nothing about ours
+            botSeq.current.clear();
+            loadAll();
+          }
           break;
         case "message": {
           rawDispatch({ type: "messageAdded", threadId: frame.threadId, message: frame.message });
@@ -549,6 +576,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               body: JSON.stringify({ unread: false }),
             }).catch(() => {});
           }
+          if (typeof frame._seq === "number") botSeq.current.set(bot.id, frame._seq);
           rawDispatch({ type: "botPatched", bot: withoutEdits(bot, editing(bot.id)) });
           break;
         }

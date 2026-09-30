@@ -7563,7 +7563,7 @@ const server = createServer(async (req, res) => {
       }
       const fresh = store.bot(bot.id)!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
-      return json(res, 201, { bot: { ...clientBot(fresh), ...laneFor(task.id) } });
+      return json(res, 201, { bot: { ...clientBot(fresh), ...laneFor(task.id) }, seq: frameSeq });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/activate$/);
     if (m && method === "POST") {
@@ -7572,7 +7572,7 @@ const server = createServer(async (req, res) => {
       store.markLane(m[1], m[2], false);
       const fresh = store.bot(m[1])!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
-      return json(res, 200, { bot: { ...clientBot(fresh), ...laneFor(m[2]) } });
+      return json(res, 200, { bot: { ...clientBot(fresh), ...laneFor(m[2]) }, seq: frameSeq });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)$/);
     if (m && method === "PATCH") {
@@ -7589,7 +7589,7 @@ const server = createServer(async (req, res) => {
       if (unread !== undefined) store.markLane(m[1], m[2], unread);
       const fresh = store.bot(m[1])!;
       broadcast({ kind: "bot", bot: clientBot(fresh) });
-      return json(res, 200, { bot: { ...clientBot(fresh), ...laneFor(fresh.activeTaskId) } });
+      return json(res, 200, { bot: { ...clientBot(fresh), ...laneFor(fresh.activeTaskId) }, seq: frameSeq });
     }
     if (m && method === "DELETE") {
       const outcome = store.deleteTask(m[1], m[2]);
@@ -7600,7 +7600,9 @@ const server = createServer(async (req, res) => {
       return json(
         res,
         200,
-        { bot: { ...clientBot(fresh), ...laneFor(fresh.activeTaskId) } },
+        // the sequence of the frame just sent, so a client can tell this
+        // answer from a newer record it already has
+        { bot: { ...clientBot(fresh), ...laneFor(fresh.activeTaskId) }, seq: frameSeq },
       );
     }
 

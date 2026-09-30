@@ -2439,6 +2439,18 @@ describe("task lanes", () => {
     assert.equal(two.tasks.length, 2);
   });
 
+  test("a conversation action's answer says which frame it matches, so a later one wins", async () => {
+    // A slow answer used to put an older record back over a rename made
+    // elsewhere meanwhile. Each answer now carries the sequence of the
+    // bot frame sent with it, and a rename after it sends a higher one.
+    const created = await h.json(`/api/bots/${botId}/tasks`, { method: "POST", body: JSON.stringify({ title: "Seq" }) });
+    assert.equal(typeof created.seq, "number");
+    const activated = await h.json(`/api/bots/${botId}/tasks/${created.bot.activeTaskId}/activate`, { method: "POST" });
+    assert.ok(activated.seq > created.seq);
+    const closed = await h.json(`/api/bots/${botId}/tasks/${created.bot.activeTaskId}`, { method: "DELETE" });
+    assert.ok(closed.seq > activated.seq);
+  });
+
   test("one conversation can be marked unread from its own menu", async () => {
     const { bots } = await h.json("/api/bots");
     const bot = bots.find((b: any) => b.id === botId);

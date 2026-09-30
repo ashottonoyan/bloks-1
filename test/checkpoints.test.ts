@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
-import { Checkpoints, diffLines, MAX_FILE, trackable } from "../server/checkpoints.ts";
+import { execFileSync } from "node:child_process";
+
+import { Checkpoints, diffLines, gitIgnored, MAX_FILE, trackable } from "../server/checkpoints.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "bloks-checkpoints-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -160,5 +162,59 @@ describe("checkpoints", () => {
       ["line 20", "line twenty"],
     );
     assert.equal(lines.filter((l) => l.kind === "same").length, 6);
+  });
+
+  test("what the repository ignores is not the turn's work, and Undo leaves it be", async (t) => {
+    const dir = folder("ignored", { ".gitignore": "build/\n*.log\n", "notes.md": "a\n", "build/out.js": "old build\n" });
+    try {
+      execFileSync("git", ["init", "-q", dir]);
+    } catch {
+      return t.skip("no git here");
+    }
+    if (!(await gitIgnored(dir))) return t.skip("no usable git here");
+    const cp = new Checkpoints(join(scratch, "store-ignored"));
+    await cp.begin("lane", "bot", dir);
+    writeFileSync(join(dir, "notes.md"), "b\n");
+    writeFileSync(join(dir, "build", "out.js"), "new build\n");
+    writeFileSync(join(dir, "debug.log"), "log\n");
+    const record = await cp.finish("lane");
+    assert.deepEqual(record!.files.map((f) => `${f.status} ${f.path}`), ["modified notes.md"]);
+    const undo = await cp.revert(record!.id);
+    assert.deepEqual(undo!.restored, ["notes.md"]);
+    assert.equal(readFileSync(join(dir, "build", "out.js"), "utf8"), "new build\n");
+    assert.ok(existsSync(join(dir, "debug.log")));
+  });
+
+  test("Apply keeps a later edit to a file too big to have been kept", async () => {
+    for (const [label, size] of [["small", 32], ["large", MAX_FILE + 1]] as const) {
+      const dir = join(scratch, `apply-${label}`);
+      const copy = join(scratch, `apply-${label}-copy`);
+      mkdirSync(dir);
+      mkdirSync(copy);
+      writeFileSync(join(dir, "data.bin"), Buffer.alloc(size, 65));
+      writeFileSync(join(copy, "data.bin"), Buffer.alloc(size, 65));
+      const cp = new Checkpoints(join(scratch, `apply-${label}-store`));
+      await cp.begin(label, "bot", dir, [], copy);
+      writeFileSync(join(copy, "data.bin"), Buffer.alloc(size, 66));
+      writeFileSync(join(dir, "data.bin"), Buffer.alloc(size + 1, 67));
+      const record = await cp.finish(label);
+      const result = await cp.apply(record!.id);
+      assert.deepEqual(result, { restored: [], skipped: [{ path: "data.bin", why: "changed since the rehearsal began" }] }, label);
+      assert.ok(readFileSync(join(dir, "data.bin")).every((b) => b === 67), `${label}: the later edit was lost`);
+    }
+  });
+
+  test("Apply still brings in a big file nobody touched since", async () => {
+    const dir = join(scratch, "apply-big-clean");
+    const copy = join(scratch, "apply-big-clean-copy");
+    mkdirSync(dir);
+    mkdirSync(copy);
+    const cp = new Checkpoints(join(scratch, "apply-big-clean-store"));
+    await cp.begin("clean", "bot", dir, [], copy);
+    writeFileSync(join(copy, "made.bin"), Buffer.alloc(MAX_FILE + 1, 66));
+    const record = await cp.finish("clean");
+    const result = await cp.apply(record!.id);
+    assert.deepEqual(result!.restored, ["made.bin"]);
+    assert.equal(readFileSync(join(dir, "made.bin")).length, MAX_FILE + 1);
   });
 });

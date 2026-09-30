@@ -24,6 +24,13 @@
 // over MAX_FILE are noted as changed but not kept, and a handful of
 // directories that are regenerated rather than written (node_modules and
 // friends) are skipped.
+//
+// What a repository ignores is skipped too: logs and build output are not
+// the turn's work, and an undo that deletes fresh logs and puts old build
+// output back helps nobody. Git is only asked when it is really there
+// (never the macOS stub), and matching .gitignore ourselves is a trap, so
+// without Git the folder is photographed whole, as before.
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
@@ -93,6 +100,9 @@ export interface FileChange {
   after?: string;
   /** Too big to keep, so shown but not undoable. */
   big?: boolean;
+  /** For a big file, its size and time before the turn, which is all a
+   * rehearsal's Apply has to tell whether it was changed since. */
+  beforeStat?: { size: number; mtimeMs: number };
   added?: number;
   removed?: number;
 }
@@ -262,6 +272,36 @@ export function insideReally(folder: string, target: string): boolean {
   return real === root || real.startsWith(root + sep);
 }
 
+/** A git that runs without asking to install anything, or null. On a Mac
+ * without the developer tools /usr/bin/git is a stub that opens an
+ * installer dialog, so it only counts when the tools behind it exist. */
+function realGit(): string | null {
+  if (process.platform !== "darwin") return "git";
+  for (const dir of (process.env.PATH ?? "").split(":")) {
+    if (!dir || dir === "/usr/bin") continue;
+    if (existsSync(join(dir, "git"))) return join(dir, "git");
+  }
+  const tools = ["/Library/Developer/CommandLineTools/usr/bin/git", "/Applications/Xcode.app/Contents/Developer/usr/bin/git"];
+  return tools.some((t) => existsSync(t)) ? "/usr/bin/git" : null;
+}
+
+/** What the repository around `dir` ignores and does not track, as paths
+ * relative to `dir` (a folder ends in /). Null when there is no Git, no
+ * repository, or Git took too long: the folder is then photographed
+ * whole, as it always was. */
+export function gitIgnored(dir: string): Promise<Set<string> | null> {
+  const git = realGit();
+  if (!git) return Promise.resolve(null);
+  return new Promise((done) => {
+    execFile(
+      git,
+      ["-C", dir, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+      { timeout: 5_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } },
+      (error, stdout) => done(error ? null : new Set(String(stdout).split("\0").filter(Boolean))),
+    );
+  });
+}
+
 function looksBinary(data: Buffer): boolean {
   const n = Math.min(data.length, 8000);
   for (let k = 0; k < n; k++) if (data[k] === 0) return true;
@@ -426,7 +466,13 @@ export class Checkpoints {
           continue;
         }
         if (change.big) {
-          // too big to have been kept, but still sitting in the clone
+          // too big to have been kept, but still sitting in the clone. No
+          // hash to compare, so its size and time stand in: a file changed
+          // since the rehearsal began is left alone, as a small one is.
+          if (!this.unmovedSince(target, change.beforeStat)) {
+            result.skipped.push({ path: change.path, why: "changed since the rehearsal began" });
+            continue;
+          }
           const source = join(record.rehearsal!.copy, change.path);
           if (change.status === "deleted") {
             unlinkSync(target);
@@ -553,6 +599,7 @@ export class Checkpoints {
       }
     }
     const photo: Photo = new Map();
+    const ignored = await gitIgnored(dir);
     let added = 0;
     const stack = [""];
     while (stack.length) {
@@ -574,10 +621,10 @@ export class Checkpoints {
         }
         if (info.isSymbolicLink()) continue;
         if (info.isDirectory()) {
-          if (!SKIP_DIRS.has(name)) stack.push(path);
+          if (!SKIP_DIRS.has(name) && !ignored?.has(`${path}/`)) stack.push(path);
           continue;
         }
-        if (!info.isFile() || SKIP_FILES.has(name)) continue;
+        if (!info.isFile() || SKIP_FILES.has(name) || ignored?.has(path)) continue;
         if (photo.size >= MAX_FILES) return null;
         const seen = last.get(path);
         if (seen && seen.size === info.size && seen.mtimeMs === info.mtimeMs) {
@@ -619,7 +666,10 @@ export class Checkpoints {
       const status: ChangeStatus = !a ? "added" : !b ? "deleted" : "modified";
       const big = Boolean((a && !a.hash) || (b && !b.hash));
       const change: FileChange = { path, status, ...(a?.hash ? { before: a.hash } : {}), ...(b?.hash ? { after: b.hash } : {}) };
-      if (big) change.big = true;
+      if (big) {
+        change.big = true;
+        if (a) change.beforeStat = { size: a.size, mtimeMs: a.mtimeMs };
+      }
       else this.count(change);
       out.push(change);
     }
@@ -660,6 +710,18 @@ export class Checkpoints {
     } catch {
       return null;
     }
+  }
+
+  /** Whether a file is still what a big change found before the turn:
+   * the same size and time, or still absent when there was none. */
+  private unmovedSince(path: string, before: { size: number; mtimeMs: number } | undefined): boolean {
+    let info;
+    try {
+      info = lstatSync(path);
+    } catch {
+      return !before;
+    }
+    return Boolean(before) && info.isFile() && info.size === before!.size && info.mtimeMs === before!.mtimeMs;
   }
 
   private hashOf(path: string): string | null {

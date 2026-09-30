@@ -42,6 +42,7 @@ import { killTree, launchSpec, onPath, widenPath } from "../path.ts";
 import { appendNative } from "./native.ts";
 import { describeEarlyExit, describeSpawnError } from "./spawn-error.ts";
 import { within } from "./deadline.ts";
+import { OWN_GROUP } from "../no-console.ts";
 
 export interface AcpSpec {
   kind: string;
@@ -300,7 +301,7 @@ export function acpDriver(spec: AcpSpec): ProviderDriver<AcpConfig> {
           env: childEnv(turn.env),
           stdio: ["pipe", "pipe", "pipe"],
           // process groups are POSIX; on Windows the kill takes the tree
-          detached: process.platform !== "win32",
+          detached: OWN_GROUP,
           windowsHide: true,
           windowsVerbatimArguments: launch.windowsVerbatimArguments,
         });

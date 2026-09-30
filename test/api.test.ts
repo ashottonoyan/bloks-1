@@ -1362,6 +1362,11 @@ process.stdin.on("end", () => console.log(JSON.stringify({ type: "result", subty
     const asking = await turn("ask");
     assert.equal(asking[asking.indexOf("--permission-mode") + 1], "acceptEdits");
     assert.ok(asking.includes("--permission-prompt-tool"), "every other mode keeps the approval bridge");
+    assert.ok(!asking.includes("--settings"), "hooks run unless switched off");
+    // hooks switched off for this agent (#81)
+    await h2.fetch(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ engineHooks: false }) });
+    const quiet = await turn("ask");
+    assert.deepEqual(JSON.parse(quiet[quiet.indexOf("--settings") + 1]), { disableAllHooks: true });
   });
 
   test("an agent never passes on or takes more approvals than it has", async (t) => {

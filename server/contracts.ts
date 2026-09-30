@@ -129,6 +129,9 @@ export interface SendTurnInput {
   threadId: ThreadId;
   text: string;
   model?: string;
+  /** Run without the engine's hooks (Claude Code: plugins and settings
+   * hooks). Engines without hooks ignore it. */
+  noHooks?: boolean;
   /** Reasoning effort, for engines with the dial. Others ignore it. */
   effort?: "low" | "medium" | "high";
   /** The provider's own idea of where this conversation was, from the last

@@ -216,6 +216,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "composio"
         | "browser"
         | "backupSelection"
+        | "engineHooks"
       >
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
@@ -511,6 +512,24 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </div>
             <ModelPicker bot={bot} />
           </div>
+          {state.instances.find((i) => i.instanceId === bot.modelSelection?.instanceId)?.driverKind === "claudeAgent" && (
+            // Claude Code runs the hooks your plugins and settings install,
+            // and a plugin's session-start text lands in the agent's own
+            // context. Some agents are better off without any of it.
+            <div className="flex items-center justify-between gap-4 rounded-2xl border bg-card p-4">
+              <div>
+                <div className="text-[13.5px] font-semibold text-foreground">Plugin hooks</div>
+                <div className="mt-0.5 text-[12.5px] text-muted-foreground">
+                  Let Claude Code run your plugins' and settings' hooks in this agent's turns
+                </div>
+              </div>
+              <Switch
+                checked={bot.engineHooks !== false}
+                onCheckedChange={(on: boolean) => patch({ engineHooks: on })}
+                aria-label="Plugin hooks"
+              />
+            </div>
+          )}
           {suggestion && <EngineSuggestionCard s={suggestion} compact />}
 
           <div className="flex items-center justify-between gap-4 rounded-2xl border bg-card p-4">

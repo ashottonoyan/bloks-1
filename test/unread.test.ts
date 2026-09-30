@@ -34,6 +34,14 @@ describe("per-lane unread", () => {
     assert.equal(pingedLane(bot), "c");
     assert.equal(pingedLane({ ...bot, tasks: [lane("a", true, 5)] }), null, "the open lane is not somewhere to go");
   });
+  test("a lane stopped on you comes before an unread one, read or not (#81)", () => {
+    const bot = {
+      threadId: "a",
+      activeTaskId: "a",
+      tasks: [lane("a", false, 5), lane("b", true, 9), { ...lane("c", false, 1), state: "needs-you" }],
+    };
+    assert.equal(pingedLane(bot), "c");
+  });
   test("reading the open lane leaves the others, and the agent follows them", () => {
     const bot = { threadId: "a", activeTaskId: "a", unread: true, tasks: [lane("a", true, 5), lane("b", true, 1)] };
     const read = readOpenLane(bot);

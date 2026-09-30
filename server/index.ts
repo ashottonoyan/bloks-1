@@ -1619,6 +1619,13 @@ bus.subscribe((event: RuntimeEvent) => {
       // readable notice rather than a truncated mono chip, because the
       // message is usually instructions for the user.
       pushMessage({ role: "bot", kind: "notice", text: event.message.slice(0, 600) });
+      // Out of credit, over a limit, signed out: nothing in this lane moves
+      // until the person does something, so the lane says so with its dot
+      // instead of waiting to be found (the app also raises a banner).
+      if (!inRoom && outReason(event.message)) {
+        store.markLane(bot.id, event.threadId, true);
+        broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
+      }
       break;
     }
     case "turn.completed": {
@@ -2676,6 +2683,7 @@ async function startTurn(
         text: turnText,
         model: selection.model,
         effort: bot.effort,
+        ...(bot.engineHooks === false ? { noHooks: true } : {}),
         resumeCursor: engineFresh ? undefined : task.resumeCursors[instanceId],
         transcript,
         system:
@@ -5060,11 +5068,14 @@ async function sendUserMessage(botId: string, text: string, options: { taskId?: 
     const entry = steerQueues.get(lane.id) ?? { botId: bot.id, items: [] };
     entry.items.push({ messageId: message.id, text });
     steerQueues.set(lane.id, entry);
-    return { ok: true, queued: true };
+    return { ok: true, queued: true, taskId: lane.id, lane: lane.title };
   }
   await startTurn(bot.id, text, { taskId: lane.id, replyTo: options.replyTo });
   triggersFired({ kind: "message", targetId: bot.id, text, fromUser: true });
-  return { ok: true };
+  // which conversation it went to, so a caller outside the app (the MCP
+  // connector) reads the answer from there and not from whichever lane
+  // happens to be open
+  return { ok: true, taskId: lane.id, lane: lane.title };
 }
 
 const choosingDecisions = new Set<string>();
@@ -6083,6 +6094,12 @@ const server = createServer(async (req, res) => {
         }
         patch.voice = voice ?? null;
       }
+      if (body.engineHooks !== undefined) {
+        if (typeof body.engineHooks !== "boolean") {
+          return json(res, 400, { error: "engineHooks must be true or false" });
+        }
+        patch.engineHooks = body.engineHooks;
+      }
       if (body.speakReplies !== undefined) {
         if (typeof body.speakReplies !== "boolean") {
           return json(res, 400, { error: "speakReplies must be true or false" });
@@ -6377,7 +6394,9 @@ const server = createServer(async (req, res) => {
       }
       const text = clamp(body.text, MAX_MESSAGE_CHARS);
       if (!text) return json(res, 400, { error: "text required" });
-      const result = await sendUserMessage(m[1], text, { replyTo: replyRef(body.replyTo) });
+      // a lane may be named; otherwise the one that is open
+      const taskId = typeof body.taskId === "string" && body.taskId ? body.taskId : undefined;
+      const result = await sendUserMessage(m[1], text, { taskId, replyTo: replyRef(body.replyTo) });
       return json(res, 202, result);
     }
     // ── task lanes ──
@@ -6886,6 +6905,21 @@ const server = createServer(async (req, res) => {
 
     // ── editing and taking back ──
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)$/);
+    if (m && method === "GET") {
+      // One whole message, for a search hit's snippet that stopped
+      // mid-sentence. The person's, not an agent's: an agent reads its own
+      // conversations through its own tools.
+      if (asAgent) return json(res, 403, { error: "that is the person's to read" });
+      const message = store.messagesFor(m[1]).find((x) => x.id === m![2] && !x.deleted);
+      if (!message) return json(res, 404, { error: "no such message" });
+      const owner = store.bots.find((b) => b.tasks.some((t) => t.id === m![1]));
+      const room = bloks.bloks.find((r) => r.id === m![1]);
+      return json(res, 200, {
+        message,
+        botId: owner?.id ?? null,
+        conversation: owner?.tasks.find((t) => t.id === m![1])?.title ?? room?.name ?? null,
+      });
+    }
     if (m && (method === "PATCH" || method === "DELETE")) {
       const existing = store.messagesFor(m[1]).find((msg) => msg.id === m![2]);
       if (!existing) return json(res, 404, { error: "no such message" });

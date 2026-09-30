@@ -188,6 +188,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (resume) argv.push("--resume", resume);
       else argv.push("--session-id", newId());
       if (turn.model) argv.push("--model", turn.model);
+      // this agent's owner switched hooks off: a plugin's session-start
+      // text would otherwise land in its context as if it were an order
+      if (turn.noHooks) argv.push("--settings", JSON.stringify({ disableAllHooks: true }));
       // extra editable folders, chiefly the agent's own workspace: memory
       // updates must not stall on approval cards when cwd points elsewhere
       for (const dir of turn.extraDirs ?? []) argv.push("--add-dir", dir);

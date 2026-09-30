@@ -277,6 +277,35 @@ function Bubble({
 /** Something the agent did, as one quiet line. Spinning while it runs,
  * then a tick or a cross. */
 /**
+ * Another of this agent's conversations stopped on a question or an
+ * approval. The card lives in that conversation's transcript, so from this
+ * one it could be listed as waiting and still not be anywhere on screen.
+ */
+function OtherLaneWaiting({ bot }: { bot: Bot }) {
+  const { dispatch } = useStore();
+  const open = bot.activeTaskId ?? bot.threadId;
+  const waiting = (bot.tasks ?? []).filter((t) => t.state === "needs-you" && t.id !== open);
+  if (!waiting.length) return null;
+  const first = waiting[0];
+  return (
+    <div className="mx-auto w-full max-w-[760px] px-4 md:px-6">
+      <button
+        onClick={() => dispatch({ type: "selectTask", botId: bot.id, taskId: first.id })}
+        className="mb-2 flex w-full items-center gap-2 rounded-xl bg-warning/10 px-3.5 py-2 text-left text-[13px] text-warning transition-colors duration-150 hover:bg-warning/15"
+      >
+        <span className="size-1.5 shrink-0 rounded-full bg-warning" />
+        <span className="min-w-0 flex-1 truncate">
+          {waiting.length === 1
+            ? `"${first.title}" is waiting on you`
+            : `${waiting.length} other conversations are waiting on you`}
+        </span>
+        <span className="shrink-0 font-medium">Open</span>
+      </button>
+    </div>
+  );
+}
+
+/**
  * Said before the first message rather than after it: this agent's engine
  * is missing or signed out, so anything sent now would come back as an
  * error. The fix is right here, the same Install or Sign in the first-run
@@ -976,6 +1005,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           </button>
         </div>
       )}
+      <OtherLaneWaiting bot={bot} />
       <EngineBanner bot={bot} />
       <Composer bot={bot} replyTo={replyTo} onClearReply={() => setReplyTo(null)} prefill={prefill} />
       {state.meetingFor === bot.id && <MeetingPanel bot={bot} />}

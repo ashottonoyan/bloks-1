@@ -279,6 +279,10 @@ export interface BotRecord {
   /** Read replies aloud as they settle, even outside a call. Off by
    * default: speech is billed per character. */
   speakReplies?: boolean;
+  /** False keeps Claude Code's plugin and settings hooks out of this
+   * agent's turns: a plugin's session-start text otherwise arrives in the
+   * agent's context, where it reads like an injected instruction. */
+  engineHooks?: boolean;
   /** Components this agent may not answer with. By exclusion rather than
    * by grant: withholding one from one agent should not touch anybody
    * else, and a list of everything permitted goes stale as the gallery

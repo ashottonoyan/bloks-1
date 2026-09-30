@@ -200,6 +200,8 @@ export interface Bot {
   voice?: { provider: "elevenlabs" | "openai" | "system"; id: string; name?: string } | null;
   /** Read replies aloud as they settle. */
   speakReplies?: boolean;
+  /** False: Claude Code runs this agent's turns without hooks. */
+  engineHooks?: boolean;
   /** The public half of this agent's key, hex. What its signatures in
    * the record are checked against. */
   fingerprint?: string;
@@ -252,14 +254,19 @@ export interface AgentDefaults {
   effort?: "low" | "medium" | "high";
 }
 
-type Lane = { id: string; unread?: boolean; lastAt?: number; createdAt: number };
+type Lane = { id: string; unread?: boolean; lastAt?: number; createdAt: number; state?: string };
 type LanedBot = { activeTaskId?: string; threadId: string; unread?: boolean; tasks?: Lane[] };
 
-/** The conversation that pinged you: the most recent unread lane, when it
- * is not the one already open. Opening an agent goes there, because the
- * dot on the agent was about it. */
+/** The conversation that pinged you: one stopped on you first, then the
+ * most recent unread lane, when it is not the one already open. Opening an
+ * agent goes there, because the dot on the agent was about it. */
 export function pingedLane(bot: LanedBot): string | null {
   const open = bot.activeTaskId ?? bot.threadId;
+  // A lane stopped on a question or an approval comes first, read or not:
+  // going only to unread lanes meant an approval in a lane already looked
+  // at could not be found from the agent at all.
+  const stopped = (bot.tasks ?? []).find((t) => t.state === "needs-you" && t.id !== open);
+  if (stopped) return stopped.id;
   const waiting = (bot.tasks ?? [])
     .filter((t) => t.unread && t.id !== open)
     .sort((a, b) => (b.lastAt ?? b.createdAt) - (a.lastAt ?? a.createdAt));

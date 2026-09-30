@@ -66,7 +66,7 @@ describe("bloks-mcp", () => {
     child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
     const { result } = await rpc("tools/list");
     const names = result.tools.map((t: any) => t.name).sort();
-    assert.deepEqual(names, ["ask_agent", "list_agents", "list_rooms", "message_room", "morning_brief", "read_conversation", "search", "waiting_on_me"]);
+    assert.deepEqual(names, ["ask_agent", "list_agents", "list_rooms", "message_room", "morning_brief", "read_conversation", "read_message", "search", "waiting_on_me"]);
     assert.ok(!names.some((n: string) => /approve|delete|setting|key/i.test(n)), "nothing that approves, deletes or configures");
   });
 

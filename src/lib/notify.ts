@@ -24,6 +24,9 @@
 //   They are the work, not news about it.
 
 /** The parts of a message this decision actually depends on. */
+const ENGINE_OUT =
+  /credit balance is too low|insufficient[_ ](?:quota|credits|funds|balance)|billing|payment required|\b402\b|out of credits|exceed your available credits|usage limit|limit (?:reached|exceeded)|quota|rate[ _-]?limit|\b429\b|not (?:logged|signed) in|sign in/i;
+
 export interface NotifiableMessage {
   role?: string;
   kind?: string;
@@ -90,6 +93,15 @@ export function noticeFor(message: NotifiableMessage, ctx: NotifyContext): Notic
       target,
       urgent: true,
     };
+  }
+
+  // An agent that could not answer because its engine is out: credits, a
+  // plan limit, a sign-in. Its work is stopped until the person acts, the
+  // same as a question, so it is said even when the agent is otherwise
+  // quiet. The words match server/failover.ts, which reads the same errors.
+  if (message.kind === "notice" && message.text && ENGINE_OUT.test(message.text)) {
+    if (watching) return null;
+    return { title: `${who} could not answer`, body: preview(message.text), target, urgent: true };
   }
 
   if (message.kind !== "text" || !message.text?.trim()) return null;

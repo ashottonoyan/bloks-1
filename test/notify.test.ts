@@ -87,3 +87,12 @@ describe("what is worth interrupting for", () => {
     assert.equal(notice?.body, "one two tthree");
   });
 });
+
+describe("an agent that could not answer", () => {
+  test("out of credit is said like a question, and ordinary notices stay quiet (#81)", () => {
+    const out = noticeFor({ role: "bot", kind: "notice", text: "402 This request would exceed your available credits" }, base);
+    assert.equal(out?.title, "Sage could not answer");
+    assert.equal(out?.urgent, true);
+    assert.equal(noticeFor({ role: "bot", kind: "notice", text: "Starting a new task keeps this one readable." }, base), null);
+  });
+});

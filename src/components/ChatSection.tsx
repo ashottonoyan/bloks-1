@@ -11,6 +11,7 @@ import { api } from "@/state/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { usePageVisible } from "@/lib/pageVisible";
 
 type Platform = "slack" | "discord";
 
@@ -44,12 +45,15 @@ export function ChatSection() {
       .then(setStatus)
       .catch(() => setStatus(null));
 
+  // the connection settles a moment after it is saved, so this looks
+  // again, but only while somebody can see the answer
+  const visible = usePageVisible();
   useEffect(() => {
+    if (!visible) return;
     void load();
-    // the connection settles a moment after it is saved
     const timer = setInterval(() => void load(), 4000);
     return () => clearInterval(timer);
-  }, []);
+  }, [visible]);
 
   if (!status) return null;
   return (

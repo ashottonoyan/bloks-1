@@ -110,7 +110,8 @@ export interface RelayState {
 }
 
 const RETRY_MIN_MS = 2_000;
-const RETRY_MAX_MS = 60_000;
+// the cap, which tests shorten to see a refused Mac try again
+const RETRY_MAX_MS = Number(process.env.BLOKS_RELAY_RETRY_MAX_MS) || 60_000;
 /** The relay drops a link it has not heard from; speak well inside that. */
 const KEEPALIVE_MS = 30_000;
 /** One push's limits, well inside the relay's 2 MB body cap. */
@@ -200,6 +201,10 @@ export class RelayLink {
    * envelopes are keyed from, and what spending it does. */
   pairSecret: (linkId: string) => string | null = () => null;
   pairClaim: (linkId: string, body: unknown) => unknown | null = () => null;
+  /** Called when the relay refuses this Mac's token. Another Bloks on the
+   * same ~/.bloks (the app beside a headless server) may have activated
+   * Cloud again and saved new tokens this process has not read yet. */
+  onRejected: () => void = () => {};
 
   constructor(port: number, onChange: (state: RelayState) => void = () => {}) {
     this.port = port;
@@ -503,10 +508,13 @@ export class RelayLink {
           this.setState({
             connected: false,
             delivering: false,
-            problem: `The relay is not accepting ${thisMachine()} yet. Retrying.`,
+            // The usual cause by far: Cloud was activated again with the
+            // same licence, which retires the space this token belonged to.
+            problem: `Bloks Cloud does not recognise ${thisMachine()}'s space. If Cloud was activated again with this licence, here or elsewhere, activate it again on the computer that should keep it. Retrying.`,
           });
           this.retry = RETRY_MAX_MS;
           this.schedule();
+          this.onRejected();
           return;
         }
         throw new Error(`relay answered ${res.status}`);

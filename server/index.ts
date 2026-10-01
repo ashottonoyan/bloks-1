@@ -3689,6 +3689,16 @@ relayLink.memberFrame = (frame, personId) => memberFrame(frame, (roomId) => view
 relayLink.previewOf = previewOf;
 relayLink.onHook = (hook) => (hook.platform === "email" ? onEmailHook(hook) : onWhatsAppHook(hook));
 relayLink.pairSecret = (linkId) => pairLinkSecret(linkId);
+// A second Bloks on this ~/.bloks (the app beside a headless server) that
+// activated Cloud again saved new tokens this process still has the old
+// ones of. Read them from disk rather than dial a retired space forever.
+relayLink.onRejected = () => {
+  const disk = loadConfig().relay;
+  if (disk?.agentToken && disk.agentToken !== cfg.relay?.agentToken) {
+    cfg.relay = disk;
+    syncRelay();
+  }
+};
 relayLink.pairClaim = (linkId, body) => {
   const b = (body ?? {}) as { name?: unknown; tokenHash?: unknown };
   const device = claimPairLink(linkId, b.name, b.tokenHash);

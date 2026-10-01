@@ -116,6 +116,9 @@ export async function claimPairLink(link, name) {
   }
   const outer = await res.json().catch(() => ({}));
   if (res.status === 503 || res.status === 504) throw new Error("The other computer is not connected to Bloks Cloud right now.");
+  // the relay refusing the link's own token is not a used link: the space
+  // it named is gone, usually because Cloud was activated again
+  if (res.status === 401) throw new Error("Bloks Cloud does not recognise the other computer any more. Cloud was probably activated again; make a fresh link there once it shows Connected.");
   const reply = outer.payload ? open(keys.open, outer.payload) : null;
   if (!reply || reply.status !== 200 || !reply.body?.deviceId) {
     throw new Error(reply?.body?.error ?? "That pairing link was already used or has expired. Run bloks-server pair again.");

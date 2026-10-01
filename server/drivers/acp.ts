@@ -68,6 +68,9 @@ export interface AcpSpec {
    * its own. Checked so an installed-but-signed-out agent says so instead
    * of failing on the first message. */
   authFiles?: string[];
+  /** Answers without any sign-in (OpenCode serves free models out of the
+   * box), so a missing credential is not "signed out", only unknown. */
+  signInOptional?: boolean;
   /** Used until session/new reports what the agent actually serves. */
   models: ModelCatalog;
   /** When --version would start a session instead of printing a
@@ -644,7 +647,11 @@ export function acpDriver(spec: AcpSpec): ProviderDriver<AcpConfig> {
         if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
         const hasKey = (spec.keyEnv ?? []).some((k) => input.environment[k] || process.env[k]);
         const signedIn = (spec.authFiles ?? []).some((f) => existsSync(join(homedir(), f)));
-        return { state: "available", version: `${spec.name} ${version}`, authenticated: hasKey || signedIn };
+        // An agent that answers without a sign-in is not "signed out" for
+        // want of one: saying so put up a warning nobody could clear while
+        // the agent was answering fine on a free model.
+        const authenticated = hasKey || signedIn ? true : spec.signInOptional ? undefined : false;
+        return { state: "available", version: `${spec.name} ${version}`, authenticated };
       };
 
       return {
@@ -694,6 +701,8 @@ export const ACP_SPECS: readonly AcpSpec[] = [
     signIn: "run `opencode auth login` to connect a provider",
     // it manages its own provider credentials; nothing of ours to pass
     authFiles: [".local/share/opencode/auth.json"],
+    // OpenCode Zen's free models need no provider at all
+    signInOptional: true,
     // placeholder until session/new reports the real catalog, which for
     // opencode depends entirely on which providers are connected
     probeModels: true,

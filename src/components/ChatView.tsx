@@ -324,13 +324,38 @@ function EngineBanner({ bot }: { bot: Bot }) {
   // Signing in happens in Terminal; coming back to this window is the
   // moment to look again, so the warning goes without a click.
   const showing = missing || signedOut;
+  // Dismissed per engine and per problem, so closing "not signed in" does
+  // not also hide a later "not installed" for the same engine.
+  const dismissKey = instance ? `bloks.engineBanner.${instance.instanceId}.${missing ? "missing" : "signedOut"}` : "";
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return Boolean(dismissKey) && localStorage.getItem(dismissKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      setDismissed(Boolean(dismissKey) && localStorage.getItem(dismissKey) === "1");
+    } catch {
+      setDismissed(false);
+    }
+  }, [dismissKey]);
+  const dismiss = () => {
+    setDismissed(true);
+    try {
+      localStorage.setItem(dismissKey, "1");
+    } catch {
+      /* hidden for this visit only */
+    }
+  };
   useEffect(() => {
     if (!showing) return;
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showing]);
-  if (!instance || !showing) return null;
+  if (!instance || !showing || dismissed) return null;
   // Another engine that would answer right now, preferring one that runs
   // tools, so the quickest fix is a single click rather than a setup.
   const ready = state.instances.filter(
@@ -384,6 +409,14 @@ function EngineBanner({ bot }: { bot: Bot }) {
               Open engine settings
             </button>
           </div>
+          <button
+            onClick={dismiss}
+            aria-label="Dismiss"
+            title="Dismiss"
+            className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors duration-150 hover:bg-warning/10 hover:text-foreground"
+          >
+            <X size={13} />
+          </button>
         </div>
       </div>
     </div>

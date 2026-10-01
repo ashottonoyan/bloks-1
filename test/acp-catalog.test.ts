@@ -296,3 +296,36 @@ test("the harness reports Pi available when pi-acp lives in a global bin", async
         await h.stop();
     }
 });
+
+test("OpenCode with no provider connected is not reported as signed out", async () => {
+    // OpenCode serves free models with no sign-in, so "no auth file" put
+    // up a "not signed in" banner nobody could clear while the agent was
+    // answering. Unknown is the honest answer; Pi still needs its sign-in.
+    const home = mkdtempSync(join(tmpdir(), "bloks-opencode-auth-"));
+    const bin = join(home, ".local", "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "opencode"), "#!/bin/sh\necho 2.0.21\n", { mode: 0o755 });
+    const spec = ACP_SPECS.find((s) => s.kind === "opencode")!;
+    const prev = { HOME: process.env.HOME, PATH: process.env.PATH, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.PATH = "/nonexistent";
+    widenPath();
+    try {
+        const inst = await acpDriver(spec).create({
+            instanceId: "opencode",
+            displayName: "OpenCode",
+            enabled: true,
+            config: { cli: "opencode", fullAuto: false },
+            environment: {},
+        });
+        const snap = await inst.snapshot();
+        assert.equal(snap.state, "available");
+        assert.equal(snap.authenticated, undefined, "a free-model engine read as signed out");
+        await inst.dispose();
+    } finally {
+        process.env.HOME = prev.HOME;
+        process.env.USERPROFILE = prev.USERPROFILE;
+        process.env.PATH = prev.PATH;
+    }
+});

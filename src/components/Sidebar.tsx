@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import BellDot from "lucide-react/dist/esm/icons/bell-dot.mjs";
 import ClipboardCopy from "lucide-react/dist/esm/icons/clipboard-copy.mjs";
 import Copy from "lucide-react/dist/esm/icons/copy.mjs";
+import Eraser from "lucide-react/dist/esm/icons/eraser.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import PanelLeftClose from "lucide-react/dist/esm/icons/panel-left-close.mjs";
 import PanelLeftOpen from "lucide-react/dist/esm/icons/panel-left-open.mjs";
@@ -254,8 +255,21 @@ function BotContextMenu({
           void navigator.clipboard?.writeText(bot.threadId);
         }),
         divider("d2"),
-        // One reversible action here, and the irreversible one behind the
-        // drawer where the confirm can name what goes. Archiving takes
+        // General is cleared, never closed; not while it is working
+        general &&
+          general.state !== "working" &&
+          item(
+            <Eraser size={15} />,
+            "Clear conversation",
+            () => {
+              if (window.confirm("Clear this conversation? Its messages are deleted.")) {
+                dispatch({ type: "clearTask", botId: bot.id, taskId: general.id });
+              }
+            },
+            { danger: true },
+          ),
+        // Archiving is reversible, so it lives here; deleting the agent is
+        // behind the drawer where the confirm can name what goes. Archiving takes
         // the agent out of the list and stops it working; it keeps the
         // conversations, the rules, the rooms and the key.
         item(<Archive size={15} className="text-muted-foreground" />, "Archive", () =>

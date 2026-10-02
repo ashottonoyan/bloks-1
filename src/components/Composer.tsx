@@ -215,6 +215,48 @@ export function Composer({
     });
   };
 
+  // A file dropped anywhere in the window attaches here, not only one
+  // dropped on this box: aiming at the bottom edge is fiddly, and with a
+  // hidden Dock it brings the Dock up instead. A drop something else in
+  // the window already took (it called preventDefault) is left to it.
+  const intakeRef = useRef(intake);
+  intakeRef.current = intake;
+  const [dropping, setDropping] = useState(false);
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => Boolean(e.dataTransfer?.types.includes("Files"));
+    const enter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth++;
+      setDropping(true);
+    };
+    const leave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDropping(false);
+    };
+    const over = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const drop = (e: DragEvent) => {
+      depth = 0;
+      setDropping(false);
+      if (e.defaultPrevented || !e.dataTransfer?.files.length) return;
+      e.preventDefault();
+      intakeRef.current([...e.dataTransfer.files]);
+    };
+    window.addEventListener("dragenter", enter);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragenter", enter);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+    };
+  }, []);
+
   const send = () => {
     if (rehearse) return void startRehearsal();
     if (!text.trim() && !attachments.length) return;
@@ -411,6 +453,14 @@ export function Composer({
         intake([...e.dataTransfer.files]);
       }}
     >
+      {dropping && (
+        // the whole window is the target, so say so where the eye is
+        <div className="pointer-events-none fixed inset-2 z-50 flex animate-pop-in items-center justify-center rounded-2xl border-2 border-dashed border-brand/50 bg-background/70">
+          <span className="rounded-xl bg-popover px-3.5 py-2 text-[13px] text-foreground shadow-lg shadow-(color:--shadow-color)">
+            Drop to attach to {bot.name}
+          </span>
+        </div>
+      )}
       {replyTo && (
         <div className="mx-auto mb-2 max-w-[760px]">
           <ReplyChip draft={replyTo} onClear={() => onClearReply?.()} />

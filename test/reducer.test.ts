@@ -7,7 +7,7 @@ import { settleUnanswered, withoutEdits } from "../src/state/reducer.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { configFromFrame, initialState, reducer, type AppState, type Bot, type Message } from "../src/state/reducer.ts";
+import { configFromFrame, initialState, openLaneWorking, reducer, type AppState, type Bot, type Message } from "../src/state/reducer.ts";
 
 const bot = (id: string, over: Partial<Bot> = {}): Bot => ({
   id,
@@ -341,4 +341,15 @@ test("marking one conversation unread lights it and its agent, and nothing else"
   const a = next.bots[0];
   assert.equal(a.unread, true);
   assert.deepEqual(a.tasks?.map((t) => Boolean(t.unread)), [false, true]);
+});
+
+test("only the conversation on screen reads as working, not every one of the agent's", () => {
+  const lanes = [
+    { id: "t-a", createdAt: 1, state: "idle" },
+    { id: "t-b", createdAt: 2, state: "working" },
+  ];
+  assert.equal(openLaneWorking({ threadId: "t-a", activeTaskId: "t-a", busy: true, tasks: lanes }), false, "an idle lane said working");
+  assert.equal(openLaneWorking({ threadId: "t-b", activeTaskId: "t-b", busy: true, tasks: lanes }), true);
+  // a harness too old to report lanes keeps the agent-wide flag
+  assert.equal(openLaneWorking({ threadId: "t-a", busy: true }), true);
 });

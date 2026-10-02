@@ -9,7 +9,7 @@ import Monitor from "lucide-react/dist/esm/icons/monitor.mjs";
 import SquareTerminal from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import Square from "lucide-react/dist/esm/icons/square.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
-import { api, useStore, formatTime, type Bot, type Message } from "@/state/store";
+import { api, useStore, formatTime, openLaneWorking, type Bot, type Message } from "@/state/store";
 import { AgentAvatar } from "./Avatar";
 import { OptionCard } from "./OptionCard";
 import { MessageComponent } from "./Gallery";
@@ -707,11 +707,20 @@ export function ChatView({ bot }: { bot: Bot }) {
   };
 
   const first = bot.messages[0];
+  // this conversation, not the agent: another one may be the one working
+  const working = openLaneWorking(bot);
 
   return (
     <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      {/* Header */}
-      <div className="titlebar-drag flex h-[52px] shrink-0 items-center justify-between gap-2 px-3 md:px-4">
+      {/* Header. Its line usually comes from the tab strip below it; with
+          the conversations in the sidebar there is no strip, so the header
+          draws its own. */}
+      <div
+        className={cn(
+          "titlebar-drag flex h-[52px] shrink-0 items-center justify-between gap-2 px-3 md:px-4",
+          lanesInSidebar && "border-b",
+        )}
+      >
         <button
           onClick={() => dispatch({ type: "toggleSettings" })}
           className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1 transition-colors duration-150 hover:bg-accent"
@@ -720,15 +729,15 @@ export function ChatView({ bot }: { bot: Bot }) {
           <AgentAvatar bot={bot} size={28} />
           <span className="flex min-w-0 items-baseline gap-2 text-left">
             <span className="truncate text-[14px] font-semibold text-foreground">{bot.name}</span>
-            {(bot.busy || bot.title) && (
+            {(working || bot.title) && (
               <span className="hidden truncate text-[12px] text-muted-foreground sm:block">
-                {bot.busy ? "working…" : bot.title}
+                {working ? "working…" : bot.title}
               </span>
             )}
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-1.5">
-          {bot.busy && (
+          {working && (
             <Button
               variant="secondary"
               size="sm"
@@ -966,7 +975,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           {streaming ? (
             <StreamingBubble text={streaming} />
           ) : (
-            showTypingDots(bot.busy, streaming, bot.messages[bot.messages.length - 1]) && (
+            showTypingDots(working, streaming, bot.messages[bot.messages.length - 1]) && (
               <TypingIndicator />
             )
           )}

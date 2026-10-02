@@ -9,7 +9,7 @@ import Archive from "lucide-react/dist/esm/icons/archive.mjs";
 import FileIcon from "lucide-react/dist/esm/icons/file.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import FlaskConical from "lucide-react/dist/esm/icons/flask-conical.mjs";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, useStore, openLaneWorking, type Bot } from "@/state/store";
 import { ReplyChip, type ReplyDraft } from "./MessageActions";
 import { cn } from "@/lib/cn";
 import { AgentAvatar } from "./Avatar";
@@ -669,7 +669,7 @@ export function Composer({
             // the impatient one, the same way the CLIs offer both.
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              if ((e.metaKey || e.ctrlKey) && bot.busy) {
+              if ((e.metaKey || e.ctrlKey) && openLaneWorking(bot)) {
                 dispatch({ type: "interrupt", botId: bot.id });
               }
               send();
@@ -683,7 +683,7 @@ export function Composer({
                 ? compareWith.length
                   ? "Describe the task for each of them to rehearse…"
                   : `Describe the task for ${bot.name} to rehearse…`
-                : bot.busy
+                : openLaneWorking(bot)
                 ? `${bot.name} is working. Enter queues, ${modKey()}Enter interrupts…`
                 : `Message ${bot.name}`
           }
@@ -701,7 +701,7 @@ export function Composer({
         >
           <FlaskConical size={16} />
         </button>
-        {bot.busy ? (
+        {openLaneWorking(bot) ? (
           <button
             onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
             className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground active:scale-95"

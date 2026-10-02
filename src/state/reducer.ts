@@ -292,6 +292,17 @@ export function openLaneUnread(bot: LanedBot): boolean {
   return lane ? Boolean(lane.unread) : Boolean(bot.unread);
 }
 
+/** Whether the conversation on screen is the one working. An agent's
+ * conversations run on their own, so "busy" anywhere is not "busy here":
+ * reading it agent-wide put "working..." and typing dots on an idle
+ * conversation while another one ran. A harness too old to report lanes
+ * falls back to the agent's flag. */
+export function openLaneWorking(bot: LanedBot & { busy?: boolean }): boolean {
+  const open = bot.activeTaskId ?? bot.threadId;
+  const lane = bot.tasks?.find((t) => t.id === open);
+  return lane?.state ? lane.state === "working" : Boolean(bot.busy);
+}
+
 /** A `config` frame is the whole status plus the stream's own fields.
  * Picking fields out of it by name drops whatever was added later, and
  * the card reading a dropped field vanishes until the next reload. */

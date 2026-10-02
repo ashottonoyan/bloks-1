@@ -1822,6 +1822,7 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       drainRoomTags(bot.id);
       drainSteer(event.threadId);
+      closeIfAsked(event.threadId);
       // an agent that named someone else hands the room over to them, and
       // the person who started the chain is still the one who asked
       const requester = laneRequester.get(event.threadId);
@@ -2776,6 +2777,7 @@ async function startTurn(
       broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
       drainRoomTags(bot.id);
       drainSteer(task.id);
+      closeIfAsked(task.id);
     }
   })();
 }
@@ -3471,6 +3473,25 @@ async function dispatchRound(
   } finally {
     dispatching.delete(roomId);
   }
+}
+
+/** Conversations an agent asked to close from inside its own turn there.
+ * A lane cannot close while it is working, and the agent asking is the
+ * thing keeping it busy, so the close waits for the turn to end. */
+const closeAfterTurn = new Set<string>();
+
+/** Closes a lane its agent asked to close, once nothing is running or
+ * waiting in it. A message queued meanwhile goes first; the close then
+ * follows that turn instead. */
+function closeIfAsked(laneId: string) {
+  if (!closeAfterTurn.has(laneId)) return;
+  if ([...steerQueues.keys()].includes(laneId)) return;
+  const owner = store.taskByThread(laneId)?.bot;
+  if (!owner) return void closeAfterTurn.delete(laneId);
+  const outcome = store.deleteTask(owner.id, laneId);
+  if (outcome === "busy") return;
+  closeAfterTurn.delete(laneId);
+  if (outcome === "ok") broadcast({ kind: "bot", bot: clientBot(store.bot(owner.id)!) });
 }
 
 /** Room lines for agents that were mid-turn (server/room-tags.ts). */
@@ -7630,8 +7651,22 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { bot: { ...clientBot(fresh), ...laneFor(fresh.activeTaskId) }, seq: frameSeq });
     }
     if (m && method === "DELETE") {
+      // an agent closes the conversation it is in, never another one
+      if (asAgent && asAgent.taskId !== m[2]) {
+        return json(res, 403, { error: "an agent can close only the conversation it is in" });
+      }
       const outcome = store.deleteTask(m[1], m[2]);
       if (outcome === "missing") return json(res, 404, { error: "no such task" });
+      // An agent closing its own conversation is doing it from inside its
+      // turn there, so that turn is what keeps it busy: close it when the
+      // turn ends rather than refuse.
+      if (outcome === "busy" && asAgent && store.bot(m[1])?.tasks[0]?.id === m[2]) {
+        return json(res, 409, { error: "General is cleared, not closed" });
+      }
+      if (outcome === "busy" && asAgent) {
+        closeAfterTurn.add(m[2]);
+        return json(res, 202, { ok: true, closing: "when this turn ends" });
+      }
       if (outcome === "busy") return json(res, 409, { error: "that task is running, interrupt it first" });
       if (outcome === "general") return json(res, 409, { error: "General is cleared, not closed" });
       const fresh = store.bot(m[1])!;

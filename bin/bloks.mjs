@@ -213,6 +213,14 @@ const COMMANDS = {
       return (bot?.tasks ?? []).find((t) => t.id === me.taskId) ?? { ok: true };
     },
   },
+  close: {
+    use: "close",
+    about: "close the conversation you are in once this turn ends, when its work is done (General is never closed)",
+    run: async () => {
+      const me = await request("GET", "/api/agent/whoami");
+      return request("DELETE", `/api/bots/${me.botId}/tasks/${me.taskId}`);
+    },
+  },
   skills: {
     use: "skills",
     about: "the skill library, names and what each is for",

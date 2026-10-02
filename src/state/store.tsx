@@ -63,6 +63,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  /** The conversation on screen that the person marked unread on purpose.
+   * Opening a conversation reads it, so a frame for the open one clears
+   * its dot at once, and that also undid "mark as unread" the instant it
+   * was pressed. A flag set by hand stays until the person leaves the
+   * conversation and comes back, as in a mail app. */
+  const keptUnread = useRef<{ botId: string; laneId: string } | null>(null);
+
   /** The sequence of the last bot frame applied for each agent. An answer
    * to a conversation action carries the sequence it was built at; one
    * older than a frame already shown would put an older record back (a
@@ -293,6 +300,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(showError);
           break;
         case "selectTask":
+          keptUnread.current = null;
           api(`/api/bots/${action.botId}/tasks/${action.taskId}/activate`, { method: "POST" })
             .then(adoptAnswer)
             .catch(showError);
@@ -321,13 +329,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ text: action.text, replyTo: action.replyTo }),
           }).catch(showError);
           break;
-        case "markLaneUnread":
+        case "markLaneUnread": {
+          const shown = stateRef.current.bots.find((b) => b.id === action.botId);
+          if (action.botId === stateRef.current.selectedId && shown && (shown.activeTaskId ?? shown.threadId) === action.taskId) {
+            keptUnread.current = { botId: action.botId, laneId: action.taskId };
+          }
           api(`/api/bots/${action.botId}/tasks/${action.taskId}`, {
             method: "PATCH",
             body: JSON.stringify({ unread: true }),
           }).catch(() => {});
           break;
+        }
         case "select": {
+          // coming back to a conversation is reading it again
+          keptUnread.current = null;
           const bot = stateRef.current.bots.find((b) => b.id === action.id);
           if (!bot) break;
           // The dot on an agent is about one conversation; go to it, and
@@ -571,7 +586,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const bot = frame.bot as Partial<Bot> & { id: string };
           // an unread badge on the conversation already open is wrong the
           // moment it arrives; another lane that pinged stays unread
-          if (bot.id === stateRef.current.selectedId && bot.threadId && openLaneUnread(bot as Bot)) {
+          const kept = keptUnread.current;
+          const keptHere = kept?.botId === bot.id && kept.laneId === (bot.activeTaskId ?? bot.threadId);
+          if (bot.id === stateRef.current.selectedId && bot.threadId && !keptHere && openLaneUnread(bot as Bot)) {
             Object.assign(bot, readOpenLane(bot as Bot));
             fetch(`/api/bots/${bot.id}`, {
               method: "PATCH",

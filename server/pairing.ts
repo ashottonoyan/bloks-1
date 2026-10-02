@@ -19,9 +19,11 @@
 //   Only a SHA-256 of each token is stored, so a stolen config file
 //   cannot be replayed as a paired device.
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
+import { join } from "node:path";
 
-import { loadConfig, saveConfig } from "./config.ts";
+import { DATA_DIR, loadConfig, saveConfig } from "./config.ts";
 
 /** A device that completed pairing. The token itself is shown exactly
  * once, at claim time, and only its digest is kept. */
@@ -320,8 +322,14 @@ export function pairingStatus(): PairingStatus {
 //
 // That is the same trust the six digit code carries, and it holds for the
 // same reason: the link is only ever shown to whoever is at the host's own
-// terminal or screen. It works once, for fifteen minutes, and like the code
-// it never touches disk: a restart forgets every link that was not used.
+// terminal or screen. It works once, for fifteen minutes.
+//
+// Unused links are kept in ~/.bloks (the secret's digest and expiry, never
+// the secret), beside the paired devices' digests, which are the same kind
+// of thing. Kept in memory alone, a link was known only to the process that
+// made it, and two Bloks on one ~/.bloks (the app beside bloks-server) are
+// common: `bloks-server pair` asks one, the relay hands the claim to the
+// other, and every fresh link read as "already used".
 
 export const PAIR_LINK_TTL_MS = 15 * 60_000;
 
@@ -331,29 +339,47 @@ interface PairLink {
   expiresAt: number;
 }
 
-const pairLinks = new Map<string, PairLink>();
+const linksFile = () => join(DATA_DIR, "pair-links.json");
+
+/** The unexpired links, from disk. A missing or broken file is none. */
+function readLinks(): PairLink[] {
+  try {
+    const list = JSON.parse(readFileSync(linksFile(), "utf8"));
+    const now = Date.now();
+    return Array.isArray(list)
+      ? list.filter((l) => typeof l?.id === "string" && typeof l?.secretHash === "string" && l.expiresAt > now)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLinks(list: PairLink[]) {
+  try {
+    mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    const temp = `${linksFile()}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify(list), { mode: 0o600 });
+    renameSync(temp, linksFile());
+  } catch {
+    /* this process still knows the link; only a second one would not */
+  }
+}
 
 /** Mints a link. The secret is returned once, and only its digest kept. */
 export function createPairLink(ttlMs: number = PAIR_LINK_TTL_MS): { id: string; secret: string; expiresAt: number } {
   const now = Date.now();
-  for (const [id, link] of pairLinks) if (link.expiresAt < now) pairLinks.delete(id);
   const id = `pair_${randomBytes(9).toString("base64url")}`;
   const secret = randomBytes(32).toString("base64url");
   const link = { id, secretHash: sha256(secret), expiresAt: now + ttlMs };
-  pairLinks.set(id, link);
+  // a handful at most: a link lives fifteen minutes and is made by hand
+  writeLinks([...readLinks(), link].slice(-20));
   return { id, secret, expiresAt: link.expiresAt };
 }
 
 /** The digest the relay link needs to open an envelope for this link, or
  * null once it is used, expired or unknown. */
 export function pairLinkSecret(id: string): string | null {
-  const link = pairLinks.get(id);
-  if (!link) return null;
-  if (Date.now() > link.expiresAt) {
-    pairLinks.delete(id);
-    return null;
-  }
-  return link.secretHash;
+  return readLinks().find((l) => l.id === id)?.secretHash ?? null;
 }
 
 /** Spends a link on the device that opened it. The device made its own
@@ -362,7 +388,8 @@ export function pairLinkSecret(id: string): string | null {
 export function claimPairLink(id: string, name: unknown, tokenHash: unknown): Omit<PairedDevice, "hash"> | null {
   if (!pairLinkSecret(id)) return null;
   if (typeof tokenHash !== "string" || !/^[0-9a-f]{64}$/.test(tokenHash)) return null;
-  pairLinks.delete(id);
+  // spent here, so no other process sharing this folder can spend it too
+  writeLinks(readLinks().filter((l) => l.id !== id));
   const device: PairedDevice = {
     id: randomBytes(8).toString("hex"),
     name: cleanName(name),

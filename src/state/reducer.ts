@@ -39,7 +39,17 @@ export interface TeamPlan {
   members: Array<{ name: string; title: string; description: string; skills: string[] }>;
 }
 
+/** A message between two agents (see server/store.ts, AgentNote). */
+export interface AgentNote {
+  dir: "in" | "out" | "reply";
+  peerId: string;
+  peerName: string;
+  status?: "sent" | "queued" | "failed";
+}
+
 export interface Message {
+  /** Between two agents rather than with the person. */
+  agent?: AgentNote;
   /** The user's selection on a decision component. */
   decisionChoice?: number;
   /** Sent while the lane was busy; drains into the next turn. */

@@ -52,7 +52,7 @@ import { newId } from "./contracts.ts";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
-import { MAX_TASKS, Store, type BotRecord, type Message, type NewBotProfile } from "./store.ts";
+import { MAX_TASKS, Store, type AgentNote, type BotRecord, type Message, type NewBotProfile } from "./store.ts";
 import { addressees, BlokStore, currentSpend, MAX_MEMBERS, type BlokRecord, type RoomSharing } from "./bloks.ts";
 import { extractTeamPlan, MAX_HIRES, normalizePlan, TEAM_PROTOCOL, type TeamPlan } from "./teams.ts";
 import { houseStyle, HOUSE_STYLE } from "./house-style.ts";
@@ -1273,7 +1273,15 @@ bus.subscribe((event: RuntimeEvent) => {
         // route for engines with a shell; this is the one for the rest,
         // so an API model can answer with a chart like anybody else.
         const { components, text } = extractComponents(afterPlan);
-        if (text) pushMessage({ role: "bot", kind: "text", text: houseStyle(text) });
+        const answering = inRoom ? undefined : replyingTo.get(event.threadId);
+        if (text) {
+          pushMessage({
+            role: "bot",
+            kind: "text",
+            text: houseStyle(text),
+            ...(answering ? { agent: { dir: "reply" as const, ...answering } } : {}),
+          });
+        }
         for (const component of components) {
           if (!mayRender(component.kind, bot.withoutComponents)) continue;
           pushMessage({
@@ -1823,6 +1831,7 @@ bus.subscribe((event: RuntimeEvent) => {
       drainRoomTags(bot.id);
       drainSteer(event.threadId);
       closeIfAsked(event.threadId);
+      replyingTo.delete(event.threadId);
       // an agent that named someone else hands the room over to them, and
       // the person who started the chain is still the one who asked
       const requester = laneRequester.get(event.threadId);
@@ -2194,6 +2203,11 @@ async function startTurn(
     /** This turn runs on the agent's backup, because its own engine just
      * ran out partway through the same message. */
     fallback?: boolean;
+    /** Another agent sent this message (see AgentNote). */
+    from?: { botId: string; name: string };
+    /** A queued message from another agent, already written and worded:
+     * only marks what this turn says as that exchange's reply. */
+    answering?: { peerId: string; peerName: string };
   } = {},
 ) {
   const bot = store.bot(botId);
@@ -2349,9 +2363,17 @@ async function startTurn(
       kind: "text",
       text,
       ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+      ...(opts.from ? { agent: { dir: "in" as const, peerId: opts.from.botId, peerName: opts.from.name } } : {}),
     });
     broadcast({ kind: "message", threadId: roomId, message: userMessage });
   }
+  // what this turn says back belongs to that exchange (see AgentNote)
+  const answering = opts.from ? { peerId: opts.from.botId, peerName: opts.from.name } : opts.answering;
+  if (!blok && answering) replyingTo.set(task.id, answering);
+  else replyingTo.delete(task.id);
+  // the words as written, for naming the lane; the engine also hears who sent them
+  const said = text;
+  if (opts.from) text = fromAgentPrompt(opts.from, text);
 
   // ── the transcript for API-backed drivers ──
   //
@@ -2374,7 +2396,7 @@ async function startTurn(
       .filter((m) => m.kind === "text" && m.text && !m.deleted)
       .map((m) => ({
         role: m.role === "user" ? ("user" as const) : ("assistant" as const),
-        text: m.text!,
+        text: m.agent?.dir === "in" ? fromAgentPrompt({ botId: m.agent.peerId, name: m.agent.peerName }, m.text!) : m.text!,
       }));
     return assembleTranscript(settled, task.context ?? null, transcriptBudget);
   };
@@ -2489,7 +2511,7 @@ async function startTurn(
   // thing asked of it, kept very short so the strip reads like a to-do
   // list. General keeps its name; it is the conversation, not a task.
   if (!blok && /^Task \d+$/.test(task.title)) {
-    const words = text.replace(/\s+/g, " ").trim().split(" ");
+    const words = said.replace(/\s+/g, " ").trim().split(" ");
     let short = "";
     for (const word of words.slice(0, 3)) {
       const next = short ? `${short} ${word}` : word;
@@ -3474,6 +3496,10 @@ async function dispatchRound(
     dispatching.delete(roomId);
   }
 }
+
+/** Lanes whose running turn answers a message from another agent, so
+ * what it says is marked as that exchange's reply (see AgentNote). */
+const replyingTo = new Map<string, { peerId: string; peerName: string }>();
 
 /** Conversations an agent asked to close from inside its own turn there.
  * A lane cannot close while it is working, and the agent asking is the
@@ -5192,7 +5218,18 @@ function maybeResumeAfterConnect(botId: string, threadId: string, resumeKey: str
 // to wait on, so it is always still due.
 const steerQueues = new Map<string, { botId: string; items: Array<{ messageId?: string; text: string }> }>();
 
-async function sendUserMessage(botId: string, text: string, options: { taskId?: string; replyTo?: ReplyRef } = {}) {
+/** What an engine is told about a message another agent sent: who it is
+ * from and how to answer. The transcript keeps the words alone, with the
+ * sender as data, so the person's chat can say who it was. */
+function fromAgentPrompt(from: { botId: string; name: string }, text: string) {
+  return `(A message from ${from.name}, another agent. To answer them, use \`bloks say ${from.botId} <text>\`.)\n\n${text}`;
+}
+
+async function sendUserMessage(
+  botId: string,
+  text: string,
+  options: { taskId?: string; replyTo?: ReplyRef; from?: { botId: string; name: string } } = {},
+) {
   const bot = store.bot(botId);
   if (!bot) throw Object.assign(new Error("no such agent"), { status: 404 });
   const taskId = options.taskId ?? bot.activeTaskId;
@@ -5211,14 +5248,15 @@ async function sendUserMessage(botId: string, text: string, options: { taskId?: 
     const message = store.appendMessage(lane.id, {
       role: "user", kind: "text", text, queued: true,
       ...(options.replyTo ? { replyTo: options.replyTo } : {}),
+      ...(options.from ? { agent: { dir: "in" as const, peerId: options.from.botId, peerName: options.from.name } } : {}),
     });
     broadcast({ kind: "message", threadId: lane.id, message });
     const entry = steerQueues.get(lane.id) ?? { botId: bot.id, items: [] };
-    entry.items.push({ messageId: message.id, text });
+    entry.items.push({ messageId: message.id, text: options.from ? fromAgentPrompt(options.from, text) : text });
     steerQueues.set(lane.id, entry);
     return { ok: true, queued: true, taskId: lane.id, lane: lane.title };
   }
-  await startTurn(bot.id, text, { taskId: lane.id, replyTo: options.replyTo });
+  await startTurn(bot.id, text, { taskId: lane.id, replyTo: options.replyTo, from: options.from });
   triggersFired({ kind: "message", targetId: bot.id, text, fromUser: true });
   // which conversation it went to, so a caller outside the app (the MCP
   // connector) reads the answer from there and not from whichever lane
@@ -5251,7 +5289,12 @@ function drainSteer(threadId: string) {
   }
   // one turn answers the whole burst
   const joined = alive.map((item) => item.text).join("\n");
-  void startTurn(entry.botId, joined, { taskId: threadId, presetMessage: true }).catch((e) => {
+  // a burst that is all one agent's messages is that exchange's to answer
+  const notes = alive.map((item) => store.messagesFor(threadId).find((m) => m.id === item.messageId)?.agent);
+  const peer = notes[0];
+  const answering =
+    peer && notes.every((n) => n?.dir === "in" && n.peerId === peer.peerId) ? { peerId: peer.peerId, peerName: peer.peerName } : undefined;
+  void startTurn(entry.botId, joined, { taskId: threadId, presetMessage: true, answering }).catch((e) => {
     const failure = store.appendMessage(threadId, {
       role: "bot",
       kind: "notice",
@@ -6558,7 +6601,31 @@ const server = createServer(async (req, res) => {
         const to = store.bot(m[1]);
         if (to) taskId = mainLaneOf(to).id;
       }
-      const result = await sendUserMessage(m[1], text, { taskId, replyTo: replyRef(body.replyTo) });
+      // Another agent writing: the recipient's chat says who it was from,
+      // and the sender's own conversation keeps a record of sending it,
+      // with whether it went, waited, or was refused.
+      const sender = asAgent ? store.bot(asAgent.botId) : undefined;
+      const recipient = store.bot(m[1]);
+      const from = sender && recipient && sender.id !== recipient.id ? { botId: sender.id, name: sender.name } : undefined;
+      const noteSent = (status: NonNullable<AgentNote["status"]>) => {
+        if (!from || !recipient || !asAgent?.taskId || !sender!.tasks.some((t) => t.id === asAgent.taskId)) return;
+        const note = store.appendMessage(asAgent.taskId, {
+          role: "bot",
+          kind: "activity",
+          text,
+          tool: { name: `messaged ${recipient.name}`, ok: status !== "failed" },
+          agent: { dir: "out", peerId: recipient.id, peerName: recipient.name, status },
+        });
+        broadcast({ kind: "message", threadId: asAgent.taskId, message: note });
+      };
+      let result;
+      try {
+        result = await sendUserMessage(m[1], text, { taskId, replyTo: replyRef(body.replyTo), from });
+      } catch (e) {
+        noteSent("failed");
+        throw e;
+      }
+      noteSent(result.queued ? "queued" : "sent");
       return json(res, 202, result);
     }
     // ── task lanes ──
@@ -7694,6 +7761,44 @@ const server = createServer(async (req, res) => {
       // every window showing it empties too, not just this one
       broadcast({ kind: "bot", bot: { ...clientBot(fresh), ...(fresh.activeTaskId === m[2] ? { messages: [] } : {}) } });
       return json(res, 200, { bot: { ...clientBot(fresh), ...laneFor(fresh.activeTaskId) }, seq: frameSeq });
+    }
+
+    // Everything two agents said to each other, from both sides, oldest
+    // first: what arrived in each one's chat, what each answered in the
+    // turn it started, and any send that never arrived. Each entry names
+    // the conversation it sits in, so unrelated work stays told apart.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/exchange\/([\w-]+)$/);
+    if (m && method === "GET") {
+      const a = store.bot(m[1]);
+      const b = store.bot(m[2]);
+      if (!a || !b) return json(res, 404, { error: "no such agent" });
+      const entries: Array<Record<string, unknown>> = [];
+      for (const [self, other] of [[a, b], [b, a]] as const) {
+        for (const lane of self.tasks) {
+          for (const msg of store.messagesFor(lane.id)) {
+            const note = msg.agent;
+            if (!note || note.peerId !== other.id || msg.deleted) continue;
+            // a send that arrived is listed once, from the side it arrived on
+            if (note.dir === "out" && note.status !== "failed") continue;
+            const fromSelf = note.dir !== "in";
+            entries.push({
+              id: msg.id,
+              at: msg.at,
+              dir: note.dir,
+              ...(note.status ? { status: note.status } : {}),
+              from: fromSelf ? self.id : other.id,
+              fromName: fromSelf ? self.name : other.name,
+              to: fromSelf ? other.id : self.id,
+              toName: fromSelf ? other.name : self.name,
+              laneId: lane.id,
+              laneTitle: lane.title,
+              text: msg.text ?? "",
+            });
+          }
+        }
+      }
+      entries.sort((x, y) => (x.at as number) - (y.at as number));
+      return json(res, 200, { messages: entries.slice(-500) });
     }
 
     // What a `/` in this agent's composer can name (server/agent-commands.ts).

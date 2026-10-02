@@ -21,6 +21,7 @@ import { useLanesInSidebar } from "@/lib/conversationsView";
 import { findHits, stepHit } from "@/lib/find";
 import { attachmentBasename, splitAttachments } from "@/lib/attachments";
 import { TaskStrip } from "./TaskStrip";
+import { AgentExchangeDialog, AgentExchangeRow } from "./AgentExchange";
 import { CallButton } from "./Voice";
 import { ArtifactCard } from "./Artifacts";
 import { ConnectorCard } from "./ConnectorCard";
@@ -695,6 +696,8 @@ export function ChatView({ bot }: { bot: Bot }) {
     row?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [currentHit, visibleStart]);
 
+  // the two-agent exchange opened from one of its rows, if any
+  const [exchange, setExchange] = useState<{ peerId: string; messageId: string; text: string } | null>(null);
   const earlier = useEarlier("bot", bot);
   const lanesInSidebar = useLanesInSidebar();
   const showEarlier = () => {
@@ -905,17 +908,31 @@ export function ChatView({ bot }: { bot: Bot }) {
               return <Rewound key={m.id} messages={run} />;
             }
             if (m.deleted) return <TakenBack key={m.id} user={m.role === "user"} />;
+            // to or from another agent: a compact row, not a bubble that
+            // looks like the person's own words
+            if (m.agent && (m.kind === "text" || m.kind === "activity")) {
+              return (
+                <div key={m.id} data-msg-index={absolute}>
+                  <AgentExchangeRow
+                    message={m}
+                    botId={bot.id}
+                    fresh={fresh}
+                    onOpen={(peerId, messageId, text) => setExchange({ peerId, messageId, text })}
+                  />
+                </div>
+              );
+            }
             switch (m.kind) {
               case "options":
                 return <OptionCard key={m.id} botId={bot.id} message={m} />;
               case "activity": {
                 // a run of tool calls is one line; it starts at the first
                 const before = visibleMessages[offset - 1];
-                if (before?.kind === "activity" && !before.deleted) return null;
+                if (before?.kind === "activity" && !before.deleted && !before.agent) return null;
                 const run: Message[] = [];
                 for (let i = offset; i < visibleMessages.length; i++) {
                   const next = visibleMessages[i];
-                  if (next.kind !== "activity" || next.deleted) break;
+                  if (next.kind !== "activity" || next.deleted || next.agent) break;
                   run.push(next);
                 }
                 return <ToolRun key={m.id} messages={run} fresh={fresh} />;
@@ -1046,6 +1063,15 @@ export function ChatView({ bot }: { bot: Bot }) {
       <OtherLaneWaiting bot={bot} />
       <EngineBanner bot={bot} />
       <Composer bot={bot} replyTo={replyTo} onClearReply={() => setReplyTo(null)} prefill={prefill} />
+      {exchange && (
+        <AgentExchangeDialog
+          botId={bot.id}
+          peerId={exchange.peerId}
+          focusId={exchange.messageId}
+          focusText={exchange.text}
+          onClose={() => setExchange(null)}
+        />
+      )}
       {state.meetingFor === bot.id && <MeetingPanel bot={bot} />}
       {forwarding && (
         <ForwardDialog

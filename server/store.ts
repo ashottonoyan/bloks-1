@@ -76,7 +76,22 @@ export interface OptionCardData {
   };
 }
 
+/** A message between two agents, as it shows in either agent's chat.
+ * "in" is one that arrived from another agent, "out" is the sender's
+ * own record of sending it, and "reply" is what the recipient answered
+ * in the turn that message started. The person's chat shows these as
+ * compact rows, and the whole exchange opens from any of them. */
+export interface AgentNote {
+  dir: "in" | "out" | "reply";
+  peerId: string;
+  peerName: string;
+  /** "out" only: whether it was taken, queued behind a running turn, or refused. */
+  status?: "sent" | "queued" | "failed";
+}
+
 export interface Message {
+  /** Between two agents rather than with the person; see AgentNote. */
+  agent?: AgentNote;
   /** Set on a room message that was said in the room's linked chat
    * channel, so the bridge does not say it there a second time. */
   via?: "slack" | "discord" | "whatsapp" | "watcher" | "email";

@@ -2136,6 +2136,19 @@ function replyRef(raw: any): ReplyRef | undefined {
   return { ...(typeof raw.id === "string" ? { id: raw.id.slice(0, 40) } : {}), author, excerpt };
 }
 
+/** An agent's main conversation, General when it is still there. Not by
+ * title (an agent renames its own lane with `bloks rename`) and not by
+ * threadId (it follows whatever lane the person opened): the oldest lane
+ * that is not a watcher's, a rehearsal's or a shared room's. */
+function mainLaneOf(bot: BotRecord) {
+  const side = new Set<string>([
+    ...watchers.filter((w) => w.botId === bot.id && w.laneId).map((w) => w.laneId!),
+    ...bloks.roomsFor(bot.id).map((r) => r.lanes?.[bot.id]).filter((id): id is string => Boolean(id)),
+  ]);
+  const byAge = [...bot.tasks].sort((a, b) => a.createdAt - b.createdAt);
+  return byAge.find((t) => !side.has(t.id) && !rehearsals.forTask(t.id)) ?? byAge[0];
+}
+
 /** The lane background work (routines, webhooks) runs in. Reuses an
  * idle lane with this title, creates one when there is room, and only
  * falls back to the active lane at the lane cap. */
@@ -6516,8 +6529,14 @@ const server = createServer(async (req, res) => {
       }
       const text = clamp(body.text, MAX_MESSAGE_CHARS);
       if (!text) return json(res, 400, { error: "text required" });
-      // a lane may be named; otherwise the one that is open
-      const taskId = typeof body.taskId === "string" && body.taskId ? body.taskId : undefined;
+      // a lane may be named; otherwise the one the person has open, or, for
+      // another agent writing, General: which lane the person happened to
+      // be reading is no business of an agent's message
+      let taskId = typeof body.taskId === "string" && body.taskId ? body.taskId : undefined;
+      if (!taskId && asAgent) {
+        const to = store.bot(m[1]);
+        if (to) taskId = mainLaneOf(to).id;
+      }
       const result = await sendUserMessage(m[1], text, { taskId, replyTo: replyRef(body.replyTo) });
       return json(res, 202, result);
     }

@@ -124,10 +124,6 @@ function LaneMenu({
     </button>
   );
   const busy = lane.state === "working";
-
-  // General, the first, is cleared rather than closed
-  const isGeneral = lane.id === bot.tasks?.[0]?.id;
-
   return (
     <div
       data-lane-menu
@@ -144,20 +140,7 @@ function LaneMenu({
       })}
       <div className="mx-2 my-1 h-px bg-border" />
       {busy ? (
-        <div className="px-2.5 py-1.5 text-[12px] text-muted-foreground">
-          {isGeneral ? "Stop it before clearing" : "Stop it before closing"}
-        </div>
-      ) : isGeneral ? (
-        item(
-          <X size={15} />,
-          "Clear conversation",
-          () => {
-            if (window.confirm("Clear this conversation? Its messages are deleted.")) {
-              dispatch({ type: "clearTask", botId: bot.id, taskId: lane.id });
-            }
-          },
-          true,
-        )
+        <div className="px-2.5 py-1.5 text-[12px] text-muted-foreground">Stop it before closing</div>
       ) : (
         item(
           <X size={15} />,
@@ -206,17 +189,18 @@ function LaneRename({ title, onDone }: { title: string; onDone: (next: string | 
   );
 }
 
-/** An agent's conversations, under its row. Only agents with more than
- * one get them: a single conversation is the agent. Titles line up with
- * the agent's name above, and the state mark sits in the gutter left of
- * them, under the avatar. */
+/** An agent's conversations other than General, under its row. Titles
+ * line up with the agent's name above, and the state mark sits in the
+ * gutter left of them, under the avatar. */
 export function ConversationRows({ bot, open }: { bot: Bot; open: boolean }) {
   const { state, dispatch } = useStore();
   const [menu, setMenu] = useState<LaneMenuState | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const lanes = bot.tasks ?? [];
-  const showing = open && lanes.length > 1;
+
+  const lanes = (bot.tasks ?? []).slice(1);
+  const showing = open && lanes.length > 0;
   const activeId = state.selectedId === bot.id ? (bot.activeTaskId ?? bot.threadId) : null;
+
   return (
     <>
       <AnimatePresence initial={false}>

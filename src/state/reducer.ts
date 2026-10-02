@@ -511,7 +511,6 @@ export type Action =
   | { type: "deleteBot"; botId: string; forget?: boolean }
   | { type: "restoreBot"; botId: string }
   | { type: "duplicateBot"; botId: string }
-  | { type: "markUnread"; botId: string }
   | { type: "markLaneUnread"; botId: string; taskId: string }
   | { type: "botPatched"; bot: Partial<Bot> & { id: string } }
   | { type: "messageAdded"; threadId: string; message: Message }
@@ -828,8 +827,6 @@ export function reducer(state: AppState, action: Action): AppState {
       // for the round trip leaves the row in the drawer for a beat after
       // the press, which reads as the button not working.
       return updateBot(state, action.botId, (b) => ({ ...b, hidden: false, archivedAt: null }));
-    case "markUnread":
-      return updateBot(state, action.botId, (b) => ({ ...b, unread: true }));
     case "markLaneUnread":
       return updateBot(state, action.botId, (b) => ({
         ...b,

@@ -327,11 +327,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ unread: true }),
           }).catch(() => {});
           break;
-        case "markUnread":
-          api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify({ unread: true }) }).catch(
-            () => {},
-          );
-          break;
         case "select": {
           const bot = stateRef.current.bots.find((b) => b.id === action.id);
           if (!bot) break;

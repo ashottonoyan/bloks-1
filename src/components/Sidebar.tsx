@@ -185,6 +185,9 @@ function BotContextMenu({
   }, [onClose]);
 
   if (!bot) return null;
+
+  const general = bot.tasks?.[0];
+
   // keep the menu on-screen near the click
   const top = Math.min(menu.y, window.innerHeight - 300);
   const left = Math.min(menu.x, window.innerWidth - 220);
@@ -230,8 +233,11 @@ function BotContextMenu({
           bot.pinned ? "Unpin" : "Pin",
           () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
         ),
-        item(<BellDot size={15} className="text-muted-foreground" />, "Mark as unread", () =>
-          dispatch({ type: "markUnread", botId: bot.id }),
+        // the agent stands for General, so that is the conversation it marks
+        item(
+          <BellDot size={15} className="text-muted-foreground" />,
+          "Mark as unread",
+          () => general && dispatch({ type: "markLaneUnread", botId: bot.id, taskId: general.id }),
         ),
         item(<Folder size={15} className="text-muted-foreground" />, "Move to section…", () =>
           onFile({ kind: "bot", id: bot.id, name: bot.name, current: bot.section ?? null }),
@@ -269,8 +275,8 @@ function BotListItem({
   bot: Bot;
   onMenu: (menu: MenuState) => void;
   rail?: boolean;
-  /** The conversations view: one line per agent, with its conversations
-   * listed underneath instead of one conversation's preview. */
+  /** The conversations view: one line per agent, with its other
+   * conversations listed underneath instead of one conversation's preview. */
   compact?: boolean;
 }) {
   const { state, dispatch } = useStore();
@@ -300,23 +306,22 @@ function BotListItem({
     );
   }
   if (compact) {
-    const lanes = bot.tasks ?? [];
-    const many = lanes.length > 1;
-    const newest = Math.max(...lanes.map((t) => t.lastAt ?? t.createdAt), last?.at ?? 0);
-    const single = lanes[0];
+    // the agent's row is General; the others are listed beneath it
+    const general = bot.tasks?.[0];
+    const generalOpen = selected && (bot.activeTaskId ?? bot.threadId) === general?.id;
+    const timestamp = general ? (general.lastAt ?? general.createdAt) : 0;
+
     return (
       <div className="group/agent relative">
         <button
-          onClick={() => dispatch({ type: "select", id: bot.id })}
+          onClick={() => dispatch({ type: "select", id: bot.id, lane: general?.id })}
           onContextMenu={(e) => {
             e.preventDefault();
             onMenu({ botId: bot.id, x: e.clientX, y: e.clientY });
           }}
           className={cn(
             "flex h-[38px] w-full items-center gap-2.5 rounded-xl px-2.5 text-left transition-[background-color,scale] duration-150 ease-out active:scale-[0.99]",
-            // an agent with several conversations is a heading for them; the
-            // conversation rows carry the selection
-            selected && !many ? "bg-accent" : "hover:bg-accent/60",
+            generalOpen ? "bg-accent" : "hover:bg-accent/60",
           )}
         >
           <AgentAvatar bot={bot} size={24} />
@@ -327,21 +332,21 @@ function BotListItem({
           {/* the trailing state steps aside for the + on hover, all of it,
               so the two never sit on top of each other */}
           <span className="flex shrink-0 items-center gap-1.5 transition-opacity duration-150 group-hover/agent:opacity-0">
-            {!many && single && <LaneRing lane={single} />}
-            {!many && single?.state === "needs-you" ? (
+            {general && <LaneRing lane={general} />}
+            {general?.state === "needs-you" ? (
               <span className="text-[11px] text-warning">waiting</span>
-            ) : bot.busy || (!many && single?.state === "working") ? (
+            ) : general?.state === "working" ? (
               <Loader2
                 size={12}
                 className="animate-spin text-brand motion-reduce:animate-none"
                 aria-label="working"
               />
             ) : (
-              newest > 0 && (
-                <span className="text-[11px] tabular-nums text-muted-foreground/80">{formatWhen(newest)}</span>
+              timestamp > 0 && (
+                <span className="text-[11px] tabular-nums text-muted-foreground/80">{formatWhen(timestamp)}</span>
               )
             )}
-            {!many && bot.unread && <span className="size-1.5 rounded-full bg-brand" />}
+            {general?.unread && <span className="size-1.5 rounded-full bg-brand" />}
           </span>
         </button>
         {/* a new conversation, from the agent it is with */}

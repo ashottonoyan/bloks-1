@@ -6245,6 +6245,22 @@ const server = createServer(async (req, res) => {
         const target = store.bot(m[1]);
         if (target) store.markLane(target.id, target.activeTaskId, body.unread);
       }
+      // A model id can now be typed in by hand (an engine that takes any
+      // id), and it ends up as a process argument, so it is a model id
+      // and nothing else: an engine this workspace has, and a short name
+      // made of the characters model ids use.
+      if (body.modelSelection !== undefined) {
+        const pick = body.modelSelection as { instanceId?: unknown; model?: unknown } | null;
+        if (
+          typeof pick?.instanceId !== "string" ||
+          !registry.get(pick.instanceId) ||
+          typeof pick.model !== "string" ||
+          pick.model.length > MAX_MODEL_ID_CHARS ||
+          !/^[\w.:@/\[\]+-]+$/.test(pick.model)
+        ) {
+          return json(res, 400, { error: "modelSelection must name an engine this workspace has and a model id" });
+        }
+      }
       for (const key of ["name", "title", "description", "notifications", "modelSelection", "computer", "color", "shape", "skills", "skillIds", "seniority", "effort", "mascotExpression", "pinned", "hidden"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }

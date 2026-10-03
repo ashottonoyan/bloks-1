@@ -42,10 +42,15 @@ const byUsable = (a: InstanceInfo, b: InstanceInfo) =>
  * bot carried over from before a catalog changed is the general case.
  * The turn behaves that way already (no set_model, engine default), so
  * the picker shows and ticks exactly that. */
+/** The model a selection runs on. An empty one means the engine's
+ * default; any other is exactly what is sent, listed or not, so it is
+ * shown as itself rather than as the default it is not. */
 function effectiveModel(instance: InstanceInfo | undefined, model: string): string {
-  const isKnown = instance?.models.options.some((o) => o.id === model);
-  return isKnown ? model : (instance?.models.default ?? model);
+  return model || (instance?.models.default ?? model);
 }
+
+/** The characters a model id is made of; the server holds to the same. */
+const MODEL_ID = /^[\w.:@/[\]+-]+$/;
 
 export function ModelPicker({
   bot,
@@ -114,7 +119,27 @@ export function ModelPicker({
     const text = `${o.label} ${o.id}`.toLowerCase();
     return words.every((w) => text.includes(w));
   });
-  const searchable = (railInstance?.models.options.length ?? 0) > SEARCH_ABOVE;
+  const searchable = (railInstance?.models.options.length ?? 0) > SEARCH_ABOVE || Boolean(railInstance?.models.acceptsAnyId);
+  // A saved model this list does not have (a newer one typed in, or one
+  // the engine stopped listing) still runs as itself; it is flagged, never
+  // swapped for the default behind the person's back.
+  const unlisted =
+    railInstance &&
+    selection.instanceId === railInstance.instanceId &&
+    selection.model &&
+    !railInstance.models.options.some((o) => o.id === selection.model) &&
+    words.every((w) => selection.model.toLowerCase().includes(w))
+      ? selection.model
+      : null;
+  // an engine that takes any id offers the one being typed
+  const typed = query.trim();
+  const typedId =
+    railInstance?.models.acceptsAnyId &&
+    MODEL_ID.test(typed) &&
+    typed !== unlisted &&
+    !railInstance.models.options.some((o) => o.id === typed)
+      ? typed
+      : null;
 
   const pick = (instance: InstanceInfo, model: string) => {
     const next = { instanceId: instance.instanceId, model };
@@ -224,6 +249,11 @@ export function ModelPicker({
                       : (railInstance.snapshot.reason ?? "unavailable")}
                   </div>
                   <EngineUpdateNote kind={railInstance.driverKind} name={railInstance.displayName} className="mt-1.5" />
+                  {railInstance.models.note && (
+                    <div className="mt-1 text-pretty text-[11px] leading-snug text-muted-foreground">
+                      {railInstance.models.note}
+                    </div>
+                  )}
                 </div>
                 {searchable && (
                   <div className="sticky -top-1.5 z-10 -mt-1.5 bg-popover pb-1 pt-1.5">
@@ -237,18 +267,43 @@ export function ModelPicker({
                           if (e.key === "Escape" && query) {
                             e.preventDefault();
                             setQuery("");
-                          } else if (e.key === "Enter" && options[0] && railInstance.snapshot.state === "available") {
-                            pick(railInstance, options[0].id);
+                          } else if (e.key === "Enter" && railInstance.snapshot.state === "available") {
+                            const first = options[0]?.id ?? typedId;
+                            if (first) pick(railInstance, first);
                           }
                         }}
-                        placeholder="Search models"
+                        placeholder={railInstance.models.acceptsAnyId ? "Search, or type a model id" : "Search models"}
                         aria-label="Search models"
                         className="w-full bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground"
                       />
                     </div>
                   </div>
                 )}
-                {options.length === 0 && (
+                {unlisted && (
+                  <div
+                    aria-current="true"
+                    title={`${unlisted}\nNot in this list, and still what this agent runs on`}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg bg-accent px-2 py-1.5 text-left text-[13px] leading-snug text-foreground"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="line-clamp-2 [overflow-wrap:anywhere]">{unlisted}</span>
+                      <span className="shrink-0 rounded bg-warning/15 px-1 py-px text-[10px] text-warning">not in list</span>
+                    </span>
+                    <Check size={14} className="shrink-0 text-brand-ink" />
+                  </div>
+                )}
+                {typedId && (
+                  <button
+                    disabled={railInstance.snapshot.state !== "available"}
+                    onClick={() => pick(railInstance, typedId)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] leading-snug text-foreground transition-colors duration-150 hover:bg-accent disabled:cursor-not-allowed disabled:text-muted-foreground/50"
+                  >
+                    <span className="min-w-0 [overflow-wrap:anywhere]">
+                      Use model id <span className="font-mono text-[12px]">{typedId}</span>
+                    </span>
+                  </button>
+                )}
+                {options.length === 0 && !typedId && !unlisted && (
                   <div className="px-2 py-3 text-[13px] text-muted-foreground">No models match.</div>
                 )}
                 {options.map((option) => {

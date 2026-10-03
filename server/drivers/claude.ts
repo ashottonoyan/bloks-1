@@ -40,6 +40,7 @@ function askChoices(input: any): string[] | undefined {
 }
 import type {
   DriverCreateInput,
+  ModelCatalog,
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
@@ -54,7 +55,15 @@ import { OWN_GROUP } from "../no-console.ts";
 
 const DRIVER_KIND = "claudeAgent";
 
-const MODELS = {
+/**
+ * Claude Code has no way to list the models an account can use, so this
+ * list ships with Bloks and only changes with a release. Two things keep
+ * it from going stale in between: the "Latest" entries are Claude Code's
+ * own aliases, which always mean the newest model in that family, and any
+ * other model id can be typed into the picker, since the CLI takes
+ * whatever `--model` it is given. The picker says which of these it is.
+ */
+const MODELS: ModelCatalog = {
   default: "claude-sonnet-5",
   options: [
     { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
@@ -63,7 +72,12 @@ const MODELS = {
     { id: "claude-opus-5", label: "Claude Opus 5" },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+    { id: "opus", label: "Latest Opus" },
+    { id: "sonnet", label: "Latest Sonnet" },
+    { id: "haiku", label: "Latest Haiku" },
   ],
+  note: "Built into this version of Bloks, not fetched: Claude Code cannot list models. The Latest entries always mean the newest model in that family, and you can type any other model id above.",
+  acceptsAnyId: true,
 };
 
 /** Model used for the cheap one-shot calls (naming an agent, and similar).

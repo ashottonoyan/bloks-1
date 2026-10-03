@@ -36,6 +36,8 @@ const LIMITS: Array<[RegExp, number]> = [
   [/^claude-fable-5-1(?:$|-)/i, 1_000_000],
   [/^claude-opus-5-5(?:$|-)/i, 1_000_000],
   [/^claude/i, 200_000],
+  // Claude Code's aliases for the newest model in a family; the safe guess
+  [/^(opus|sonnet|haiku)$/i, 200_000],
   [/^gemini/i, 1_000_000],
   [/^grok/i, 131_072],
   [/^(gpt-4o|gpt-4\.1|o[134])/i, 128_000],

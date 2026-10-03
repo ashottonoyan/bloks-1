@@ -254,6 +254,12 @@ export interface ProviderSnapshot {
 export interface ModelCatalog {
   default: string;
   options: Array<{ id: string; label: string }>;
+  /** Where the list came from, said in the picker, when it is not the
+   * engine reporting it live (a list built into Bloks, for one). */
+  note?: string;
+  /** The engine takes any model id it is given, so the picker offers to
+   * use one typed in that the list does not have yet. */
+  acceptsAnyId?: boolean;
 }
 
 export interface DriverCreateInput<Config> {

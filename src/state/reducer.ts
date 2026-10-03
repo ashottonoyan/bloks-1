@@ -332,7 +332,14 @@ export interface InstanceInfo {
     authenticated?: boolean;
     version?: string | null;
   };
-  models: { default: string; options: Array<{ id: string; label: string }> };
+  models: {
+    default: string;
+    options: Array<{ id: string; label: string }>;
+    /** Where the list came from, when it is not the engine reporting it live. */
+    note?: string;
+    /** The engine takes any model id, so one typed in can be used. */
+    acceptsAnyId?: boolean;
+  };
 }
 
 /** The role a new agent is created with, sent with POST /api/bots so the

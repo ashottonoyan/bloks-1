@@ -222,6 +222,33 @@ describe("the credential itself", () => {
     assert.equal(tokens.identify(minted.token, 1_000 + TOKEN_TTL_MS), null);
   });
 
+  test("a turn still running keeps its credential past the hour, and loses it when it ends", () => {
+    // An hour of comparing quotes in a browser is ordinary work; a
+    // credential that died at sixty minutes meant the result was never
+    // delivered. The turn ending is the real limit.
+    const tokens = new AgentTokens();
+    const running = new Set(["task-1"]);
+    const alive = (taskId: string) => running.has(taskId);
+    const minted = tokens.mint(ME, "task-1", 1_000);
+    const later = 1_000 + TOKEN_TTL_MS * 3;
+    assert.ok(tokens.identify(minted.token, later, alive), "a running turn was locked out after an hour");
+    // the sweep leaves it alone too
+    tokens.sweep(later + TOKEN_TTL_MS * 2, alive);
+    assert.ok(tokens.identify(minted.token, later + TOKEN_TTL_MS * 2, alive));
+    // the turn ends: gone at once, however recently it was renewed
+    running.delete("task-1");
+    tokens.revokeTask("task-1");
+    assert.equal(tokens.identify(minted.token, later + TOKEN_TTL_MS * 2, alive), null);
+  });
+
+  test("a turn that is not running gets no renewal, so a stray credential still expires", () => {
+    const tokens = new AgentTokens();
+    const alive = () => false;
+    const minted = tokens.mint(ME, "task-1", 1_000);
+    tokens.sweep(1_000 + TOKEN_TTL_MS, alive);
+    assert.equal(tokens.identify(minted.token, 1_000 + TOKEN_TTL_MS, alive), null);
+  });
+
   test("a deleted agent's credentials go with it", () => {
     const tokens = new AgentTokens();
     const mine = tokens.mint(ME, "task-1", 1);

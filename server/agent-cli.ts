@@ -35,8 +35,15 @@ export interface AgentToken {
   spent: number;
 }
 
-/** A turn that runs longer than this has bigger problems. */
+/** How long a credential lasts without its turn vouching for it. A turn
+ * that is still running renews it (see `alive` below): long turns are
+ * ordinary work now, an hour of comparing quotes in a browser, and an
+ * agent that lost its credential partway could not deliver what it
+ * found. The hour is the backstop for a turn that never ended cleanly. */
 export const TOKEN_TTL_MS = 60 * 60 * 1000;
+
+/** Whether the turn a credential belongs to is still running. */
+export type TurnAlive = (taskId: string) => boolean;
 
 /**
  * How many things one turn may do.
@@ -272,16 +279,24 @@ export class AgentTokens {
     return minted;
   }
 
-  /** Who is calling, or nobody. */
-  identify(token: string | null | undefined, now: number): AgentToken | null {
+  /** Who is calling, or nobody. A credential past its hour still works
+   * while its turn is running, and is renewed for another; once the turn
+   * is over it is gone. */
+  identify(token: string | null | undefined, now: number, alive?: TurnAlive): AgentToken | null {
     if (!token) return null;
     const found = this.byToken.get(token);
     if (!found) return null;
-    if (found.expiresAt <= now) {
+    if (found.expiresAt <= now && !this.renew(found, now, alive)) {
       this.byToken.delete(token);
       return null;
     }
     return found;
+  }
+
+  private renew(held: AgentToken, now: number, alive?: TurnAlive): boolean {
+    if (!alive?.(held.taskId)) return false;
+    held.expiresAt = now + TOKEN_TTL_MS;
+    return true;
   }
 
   /** The turn ended. Whatever it was given stops working now rather than
@@ -308,9 +323,9 @@ export class AgentTokens {
     }
   }
 
-  sweep(now: number) {
+  sweep(now: number, alive?: TurnAlive) {
     for (const [token, held] of this.byToken) {
-      if (held.expiresAt <= now) this.byToken.delete(token);
+      if (held.expiresAt <= now && !this.renew(held, now, alive)) this.byToken.delete(token);
     }
   }
 

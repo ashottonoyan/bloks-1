@@ -440,7 +440,12 @@ function standingOf(project: Project): ProjectStanding {
 // itself. See server/agent-cli.ts for what that means and what it does
 // not mean.
 const agentTokens = new AgentTokens();
-setInterval(() => agentTokens.sweep(Date.now()), 5 * 60_000).unref?.();
+/** A turn is alive while it has started and not ended, and its lane still
+ * says it is working. A turn whose engine died without saying so ends the
+ * same way (the drivers end a turn when its process exits), so this never
+ * keeps a finished turn's credential going. */
+const turnAlive = (taskId: string) => turnStarted.has(taskId) && Boolean(store.taskByThread(taskId)?.task.busy);
+setInterval(() => agentTokens.sweep(Date.now(), turnAlive), 5 * 60_000).unref?.();
 const AGENT_CLI = fileURLToPath(new URL("../bin/bloks.mjs", import.meta.url));
 /** Bloks as an MCP server for other AI apps (bin/bloks-mcp.mjs). */
 const MCP_CLI = fileURLToPath(new URL("../bin/bloks-mcp.mjs", import.meta.url));
@@ -5871,7 +5876,7 @@ const server = createServer(async (req, res) => {
   // itself. It is checked before anything else: an agent gets a narrower
   // surface than the person at the keyboard, and the narrowing has to
   // happen whatever else the request looks like.
-  const asAgent = agentTokens.identify(bearerToken(req), Date.now());
+  const asAgent = agentTokens.identify(bearerToken(req), Date.now(), turnAlive);
   if (asAgent) {
     if (!isLocalRequest(req)) {
       return json(res, 403, { error: "an agent's credential only works on this machine" });

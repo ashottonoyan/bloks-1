@@ -30,7 +30,7 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { cn } from "@/lib/cn";
 import { thisComputer } from "@/lib/thisComputer";
 import { EngineSuggestionCard, useEngineReport } from "./EngineReport";
-import { confirmWidening } from "./ApprovalsChooser";
+import { ApprovalsChooser, confirmWidening, RULES_AND_MODES, type ApprovalMode } from "./ApprovalsChooser";
 
 function Field({
   label,
@@ -654,21 +654,14 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
 
 /**
- * How much this agent may do without asking. Three positions, widening:
- * everything cards, file edits wave through, everything waves through.
- * Deny rules in Settings, Rules and approvals outrank all three, so "auto" is a
- * shorter leash than it sounds when the user has written any.
+ * How much this agent may do without asking: the same four modes, worded
+ * the same way, as onboarding and Settings, Rules and approvals, all of
+ * them visible at once so two can be compared without switching to each.
  */
 function ApprovalsCard({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const mode = bot.approvals ?? "ask";
   const [refused, setRefused] = useState(false);
-  const OPTIONS = [
-    { id: "ask" as const, label: "Ask", hint: "Every consequential action cards" },
-    { id: "edits" as const, label: "Accept edits", hint: "File changes go ahead; the rest asks" },
-    { id: "auto" as const, label: "Auto", hint: "Everything goes ahead; deny rules still refuse" },
-    { id: "full" as const, label: "Full access", hint: "No prompts and no sandbox; rules can't catch what never asks" },
-  ];
 
   /**
    * Widening the leash asks who is there; narrowing it never does.
@@ -679,7 +672,8 @@ function ApprovalsCard({ bot }: { bot: Bot }) {
    * proves who is present when it can, and stays out of the way when it
    * cannot.
    */
-  const choose = async (next: "ask" | "edits" | "auto" | "full") => {
+  const choose = async (next: ApprovalMode) => {
+    if (next === mode) return;
     setRefused(false);
     if (!(await confirmWidening(mode, next, bot.name))) {
       setRefused(true);
@@ -692,26 +686,10 @@ function ApprovalsCard({ bot }: { bot: Bot }) {
     <div className="mt-4 rounded-2xl border bg-card p-4">
       <div className="flex items-center gap-1.5 text-[13.5px] font-semibold text-foreground">
         Approvals
-        <InfoTip text="A mode only widens what is allowed. Anything you have forbidden under Settings, Rules and approvals stays refused in every mode, and answers you chose to remember from approval cards keep working too." />
+        <InfoTip text={RULES_AND_MODES} />
       </div>
-      <div className="mt-0.5 text-[12.5px] text-muted-foreground">
-        {OPTIONS.find((o) => o.id === mode)?.hint}
-      </div>
-      <div className="mt-3 flex gap-1 rounded-xl bg-muted p-1">
-        {OPTIONS.map((option) => (
-          <button
-            key={option.id}
-            onClick={() => void choose(option.id)}
-            className={cn(
-              "flex-1 rounded-lg py-1.5 text-[12.5px] transition-colors duration-150",
-              mode === option.id
-                ? "bg-background font-medium text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {option.label}
-          </button>
-        ))}
+      <div className="mt-3">
+        <ApprovalsChooser value={mode} onChange={(next) => void choose(next)} compact />
       </div>
       {refused && (
         <div className="mt-2 text-[11.5px] text-warning">

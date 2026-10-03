@@ -2,8 +2,9 @@
 //
 // Four steps from careful to hands-off, each described by what it lets
 // through rather than by a word like "safe". Used where the choice is
-// first made (onboarding) and where it is changed later (Settings, Rules
-// and approvals), so the two can never describe the modes differently.
+// first made (onboarding), where it is changed for everyone (Settings,
+// Rules and approvals) and for one agent (its own settings), so the three
+// can never describe the modes differently.
 //
 // Widening asks who is there, the same as it does for one agent in its
 // own settings; narrowing never does.
@@ -28,7 +29,7 @@ export const APPROVAL_MODES: Array<{ id: ApprovalMode; label: string; hint: stri
   {
     id: "auto",
     label: "Auto",
-    hint: "Everything goes ahead unless one of your rules refuses it.",
+    hint: "Everything goes ahead unless one of your rules refuses it. Each engine's own sandbox stays on.",
   },
   {
     id: "full",
@@ -92,6 +93,11 @@ export function ApprovalsChooser({
     </div>
   );
 }
+
+/** What the info tips beside the chooser say about rules, one sentence
+ * shared so it cannot drift from the Full access hint above. */
+export const RULES_AND_MODES =
+  "Anything you have forbidden under Settings, Rules and approvals stays refused in Ask first, Accept edits and Auto. Full access skips those checks, because nothing asks. Answers you chose to remember from approval cards keep working too.";
 
 /** The workspace's choice as the server has it, and how many agents are
  * on each mode, for Settings and onboarding. */

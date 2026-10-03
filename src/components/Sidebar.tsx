@@ -36,6 +36,7 @@ import { inSection, sectionNames, shownInSection } from "@/lib/sections";
 import { useProfileNotes } from "./AboutYou";
 import { useBriefs } from "./BriefPanel";
 import { ConversationRows, LaneRing, SidebarFooter, WaitingRow } from "./SidebarParts";
+import { UpdateCard } from "./UpdateCard";
 import { setLanesInSidebar, useConversationsView } from "@/lib/conversationsView";
 import ListTree from "lucide-react/dist/esm/icons/list-tree.mjs";
 import Sunrise from "lucide-react/dist/esm/icons/sunrise.mjs";
@@ -1025,6 +1026,7 @@ export function Sidebar() {
         </div>
       </div>
 
+      <UpdateCard rail={rail} />
       <SidebarFooter
         rail={rail}
         counts={{

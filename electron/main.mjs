@@ -839,6 +839,9 @@ function updaterLogger() {
   return { info: write("info"), warn: write("warn"), error: write("error"), debug: write("debug") };
 }
 
+/** How often a running app looks for a newer release. */
+const RECHECK_UPDATES_MS = 4 * 60 * 60 * 1000;
+
 /** The last thing the updater said, replayed to windows that ask. */
 let updaterState = { state: "idle" };
 
@@ -1030,6 +1033,14 @@ app.whenReady().then(async () => {
       tellWindows("error", { reason: updateTrouble(message) });
     });
     autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+    // Again every few hours. Most people leave Bloks open for days, and a
+    // check only at launch meant they never heard about a release until
+    // they happened to quit. Not while one is already downloading or
+    // waiting to be installed: there is nothing newer to find then.
+    setInterval(() => {
+      if (updaterState.state === "downloading" || updaterState.state === "ready") return;
+      autoUpdater.checkForUpdates().catch(() => {});
+    }, RECHECK_UPDATES_MS).unref?.();
   }
 
   void restoreQuickShortcut();

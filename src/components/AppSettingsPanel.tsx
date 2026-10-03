@@ -156,7 +156,7 @@ function AboutCard() {
                 ? "The update downloaded but didn't install. Quit and reopen Bloks to try again."
                 : update.reason === "server"
                   ? "GitHub didn't hand over the update just now. Try again in a few minutes."
-                  : "The update check didn't reach the server. It will retry on next launch."
+                  : "The update check didn't reach the server. Bloks tries again in a few hours."
               : update.state === "dev"
                 ? "Updates apply to the installed app, not a dev build."
                 : null;

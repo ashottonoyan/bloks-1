@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { inSection, sectionNames, shownInSection } from "../src/lib/sections.ts";
+import { inSection, moveSection, orderSections, sectionNames, shownInSection } from "../src/lib/sections.ts";
 
 describe("sectionNames", () => {
   test("names come from both lists, once each, alphabetically", () => {
@@ -53,5 +53,33 @@ describe("shownInSection", () => {
 
   test("a search unfolds it", () => {
     assert.deepEqual(shownInSection(rows, true, null, true), rows);
+  });
+});
+
+describe("ordering sections", () => {
+  const names = ["Admin", "Clients", "Ops", "Travel"];
+
+  test("with nothing dragged, the order stays alphabetical", () => {
+    assert.deepEqual(orderSections(names, []), names);
+  });
+
+  test("dragged ones come first in their order, new ones follow alphabetically", () => {
+    assert.deepEqual(orderSections([...names, "Brand"], ["Travel", "Clients", "Admin", "Ops"]), [
+      "Travel",
+      "Clients",
+      "Admin",
+      "Ops",
+      "Brand",
+    ]);
+  });
+
+  test("a remembered name that no longer exists is skipped", () => {
+    assert.deepEqual(orderSections(["Ops", "Travel"], ["Gone", "Travel"]), ["Travel", "Ops"]);
+  });
+
+  test("a section moves before or after another, and the whole order is kept", () => {
+    assert.deepEqual(moveSection(names, "Travel", "Admin", "before"), ["Travel", "Admin", "Clients", "Ops"]);
+    assert.deepEqual(moveSection(names, "Admin", "Ops", "after"), ["Clients", "Ops", "Admin", "Travel"]);
+    assert.deepEqual(moveSection(names, "Ops", "Ops", "before"), names, "dropping on itself changes nothing");
   });
 });

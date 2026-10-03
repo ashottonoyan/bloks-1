@@ -32,7 +32,7 @@ import { BloksLogo, BloksMark } from "./Brand";
 import { cn } from "@/lib/cn";
 import { usePageVisible } from "@/lib/pageVisible";
 import { previewLine } from "@/lib/preview";
-import { inSection, sectionNames, shownInSection } from "@/lib/sections";
+import { inSection, moveSection, orderSections, sectionNames, shownInSection } from "@/lib/sections";
 import { useProfileNotes } from "./AboutYou";
 import { useBriefs } from "./BriefPanel";
 import { ConversationRows, LaneRing, SidebarFooter, WaitingRow } from "./SidebarParts";
@@ -80,12 +80,26 @@ interface FilingState {
  * field for a new name, and a way back out. Sections come from what is
  * already filed, so this list is never stale and never empty-but-real.
  */
+/** The order sections were dragged into on this device (see Sidebar). */
+function savedSectionOrder(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem("bloks-section-order") ?? "[]");
+    return Array.isArray(saved) ? saved.filter((n) => typeof n === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function SectionPicker({ filing, onClose }: { filing: FilingState; onClose: () => void }) {
   const { state, dispatch } = useStore();
   const [draft, setDraft] = useState("");
-  const names = sectionNames(
-    state.bots.filter((b) => !b.hidden),
-    state.bloks,
+  // listed in the same order as the sidebar's headings
+  const names = orderSections(
+    sectionNames(
+      state.bots.filter((b) => !b.hidden),
+      state.bloks,
+    ),
+    savedSectionOrder(),
   );
 
   const fileTo = (section: string | null) => {
@@ -631,6 +645,20 @@ export function Sidebar() {
     localStorage.setItem("bloks-folded-sections", JSON.stringify(next));
   };
 
+  // The order sections are dragged into, by name, kept on this device
+  // like folding. Until someone drags one, they stay alphabetical.
+  const [sectionOrder, setSectionOrder] = useState<string[]>(savedSectionOrder);
+  const saveSectionOrder = (next: string[]) => {
+    setSectionOrder(next);
+    try {
+      localStorage.setItem("bloks-section-order", JSON.stringify(next));
+    } catch {
+      /* kept for this visit only */
+    }
+  };
+  // which heading a dragged section would land against, and on which side
+  const [sectionDrop, setSectionDrop] = useState<{ name: string; place: "before" | "after" } | null>(null);
+
   // ⌘N for a new agent. ⌘K is the command palette's (CommandPalette.tsx),
   // which searches everything this box does and more; both answering it
   // meant two things grabbing focus at once.
@@ -979,7 +1007,10 @@ export function Sidebar() {
             </div>
           ))}
           {!rail &&
-            sectionNames(visibleBots, state.bloks).map((name) => {
+            (() => {
+              const shownSections = orderSections(sectionNames(visibleBots, state.bloks), sectionOrder);
+              const SECTION_TYPE = "application/x-bloks-section";
+              return shownSections.map((name, index) => {
               const rooms = inSection(state.bloks, name);
               const bots = inSection(visibleBots, name);
               if (!rooms.length && !bots.length) return null;
@@ -987,13 +1018,51 @@ export function Sidebar() {
               const searching = Boolean(query.trim());
               // A folded heading still says something is waiting inside.
               const waiting = isFolded && !searching && bots.some((b) => b.unread);
+              const hint = sectionDrop?.name === name ? sectionDrop.place : null;
               return (
-                <div key={name} className="flex flex-col gap-px">
+                <div key={name} className="relative flex flex-col gap-px">
+                  {hint && (
+                    <span
+                      className={cn(
+                        "pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-brand",
+                        hint === "before" ? "top-1" : "-bottom-px",
+                      )}
+                    />
+                  )}
                   <button
                     onClick={() => toggleFolded(name)}
                     aria-expanded={!isFolded}
-                    title={isFolded ? "Show this section" : "Fold this section"}
-                    className="flex items-center gap-1.5 rounded px-2.5 pb-1 pt-3 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+                    title={isFolded ? "Show this section. Drag to reorder" : "Fold this section. Drag to reorder"}
+                    // Drag a heading to put the sections in your own order;
+                    // Alt with an arrow key does the same from the keyboard.
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(SECTION_TYPE, name);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragOver={(e) => {
+                      if (!e.dataTransfer.types.includes(SECTION_TYPE)) return;
+                      e.preventDefault();
+                      const box = e.currentTarget.getBoundingClientRect();
+                      const place = e.clientY < box.top + box.height / 2 ? "before" : "after";
+                      if (sectionDrop?.name !== name || sectionDrop.place !== place) setSectionDrop({ name, place });
+                    }}
+                    onDragLeave={() => setSectionDrop((d) => (d?.name === name ? null : d))}
+                    onDrop={(e) => {
+                      const dragged = e.dataTransfer.getData(SECTION_TYPE);
+                      setSectionDrop(null);
+                      if (!dragged) return;
+                      e.preventDefault();
+                      saveSectionOrder(moveSection(shownSections, dragged, name, hint ?? "before"));
+                    }}
+                    onDragEnd={() => setSectionDrop(null)}
+                    onKeyDown={(e) => {
+                      if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+                      e.preventDefault();
+                      const neighbour = shownSections[index + (e.key === "ArrowUp" ? -1 : 1)];
+                      if (neighbour) saveSectionOrder(moveSection(shownSections, name, neighbour, e.key === "ArrowUp" ? "before" : "after"));
+                    }}
+                    className="flex cursor-grab items-center gap-1.5 rounded px-2.5 pb-1 pt-3 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground active:cursor-grabbing"
                   >
                     <Folder size={11} className="shrink-0" />
                     <span className="truncate">{name}</span>
@@ -1017,7 +1086,8 @@ export function Sidebar() {
                   ))}
                 </div>
               );
-            })}
+              });
+            })()}
           {visibleBots.length === 0 && !rail && (query || state.hydrated) && (
             <div className="px-3 py-8 text-center text-[13px] text-muted-foreground">
               {query ? "No agents match" : "No agents yet. Create one with +"}

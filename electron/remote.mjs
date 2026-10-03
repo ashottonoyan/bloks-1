@@ -289,7 +289,14 @@ export async function startRemoteProxy(profile, { staticDir, port = 0, onState =
       res.end(JSON.stringify({ error: status === 413 ? e.message : "the other computer could not be reached" }));
     }
   });
-  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  // a port that is taken says so, rather than leaving this waiting forever
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
   void listen();
   return {
     port: server.address().port,

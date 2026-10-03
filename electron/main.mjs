@@ -1132,9 +1132,24 @@ function saveRemoteProfile(profile) {
   fs.writeFileSync(remoteFile(), safeStorage.encryptString(JSON.stringify(profile)), { mode: 0o600 });
 }
 
+/** The port the remote proxy had last time. The window's storage (folded
+ * sections, the sidebar's width, cards you closed) belongs to its origin,
+ * and the origin includes the port, so a fresh port every launch quietly
+ * forgot all of it. */
+const REMOTE_PORT_FILE = () => path.join(app.getPath("userData"), "remote-port.json");
+
+function readRemotePort() {
+  try {
+    const port = JSON.parse(fs.readFileSync(REMOTE_PORT_FILE(), "utf8")).port;
+    return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
 async function startRemote(profile) {
   try {
-    const proxy = await startRemoteProxy(profile, {
+    const options = {
       staticDir: path.join(process.resourcesPath, "ui"),
       onState: (state) => {
         remoteState = state;
@@ -1142,7 +1157,21 @@ async function startRemote(profile) {
           if (!win.isDestroyed()) win.webContents.send("remote:state", { host: profile.host, ...state });
         }
       },
-    });
+    };
+    const remembered = readRemotePort();
+    let proxy;
+    try {
+      proxy = await startRemoteProxy(profile, { ...options, port: remembered ?? 0 });
+    } catch (error) {
+      // that port is someone else's now; any free one, remembered from here
+      if (!remembered) throw error;
+      proxy = await startRemoteProxy(profile, { ...options, port: 0 });
+    }
+    try {
+      fs.writeFileSync(REMOTE_PORT_FILE(), JSON.stringify({ port: proxy.port }));
+    } catch {
+      /* next launch picks another, as before */
+    }
     remoteProfile = profile;
     serverPort = proxy.port;
     return true;

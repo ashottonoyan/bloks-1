@@ -127,8 +127,8 @@ const COMMANDS = {
     },
   },
   hire: {
-    use: 'hire --name <name> --title <role> [--about <description>] [--skills "a,b,c"]',
-    about: "add a teammate to the workspace",
+    use: 'hire --name <name> --title <role> [--about <description>] [--skills "a,b,c"] [--section <name>]',
+    about: "add a teammate to the workspace, optionally filed into a sidebar section",
     run: (args) => {
       const flags = parseFlags(args);
       if (!flags.name) throw new Error("hire needs a --name");
@@ -137,7 +137,17 @@ const COMMANDS = {
         title: flags.title ?? "",
         description: flags.about ?? "",
         skills: flags.skills ? flags.skills.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+        ...(flags.section !== undefined ? { section: flags.section } : {}),
       });
+    },
+  },
+  file: {
+    use: "file <agent-id> <section…>",
+    about: "file an agent (yourself or a teammate) into a sidebar section; an empty section unfiles it",
+    run: (args) => {
+      const [target, ...rest] = args;
+      if (!target) throw new Error("file needs an agent id, then the section");
+      return request("PATCH", `/api/bots/${target}`, { section: rest.join(" ").trim() });
     },
   },
   room: {

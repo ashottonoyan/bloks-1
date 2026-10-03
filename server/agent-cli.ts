@@ -121,6 +121,10 @@ export const RULES: Rule[] = [
   // Answering with something other than a paragraph.
   { method: "POST", path: "/api/bots/:me/show", why: "answer with a chart, a table or another component" },
   { method: "PATCH", path: "/api/bots/:me", why: "change its own settings" },
+  // A section is a sidebar label: it changes nothing another agent can do
+  // or see, and the person can move it back. The route itself refuses
+  // anything else on an agent that is not the caller.
+  { method: "PATCH", path: "/api/bots/:id", why: "file a teammate into a sidebar section (only its section)" },
   { method: "PATCH", path: "/api/bots/:me/tasks/:id", why: "rename one of its own conversations" },
   { method: "DELETE", path: "/api/bots/:me/tasks/:id", why: "close one of its own conversations, once its turn there ends" },
 ];

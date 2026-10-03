@@ -62,7 +62,11 @@ describe("what an agent can do", () => {
 
   test("its own settings, and nobody else's", () => {
     assert.equal(allows(ME, "PATCH", `/api/bots/${ME}`).ok, true);
-    assert.equal(allows(ME, "PATCH", `/api/bots/${SOMEONE_ELSE}`).ok, false);
+    // another agent's record is reachable only to file it into a section;
+    // the route refuses every other field (test/agent-sections.test.ts)
+    assert.equal(allows(ME, "PATCH", `/api/bots/${SOMEONE_ELSE}`).ok, true);
+    assert.equal(allows(ME, "DELETE", `/api/bots/${SOMEONE_ELSE}`).ok, false);
+    assert.equal(allows(ME, "PUT", `/api/bots/${SOMEONE_ELSE}/memory`).ok, false);
   });
 
   test("how much every agent may do without asking is never an agent's to set", () => {

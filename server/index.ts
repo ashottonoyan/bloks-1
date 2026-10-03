@@ -6056,11 +6056,19 @@ const server = createServer(async (req, res) => {
         };
       }
 
+      // filed at hire, by the same rule as a later move
+      let section: string | null = null;
+      if (body.section !== undefined) {
+        const named = normalizeSection(body.section);
+        if (!named.ok) return json(res, 400, { error: named.error });
+        section = named.section;
+      }
+
       const bot = store.createBot(profile);
-      store.patchBot(
-        bot.id,
-        await newAgentSettings(asAgent ? (store.bot(asAgent.botId)?.approvals ?? "ask") : undefined),
-      );
+      store.patchBot(bot.id, {
+        ...(await newAgentSettings(asAgent ? (store.bot(asAgent.botId)?.approvals ?? "ask") : undefined)),
+        ...(section ? { section } : {}),
+      });
       record({
         at: Date.now(),
         kind: "agent.created",
@@ -6194,6 +6202,14 @@ const server = createServer(async (req, res) => {
     let m = path.match(/^\/api\/bots\/([\w-]+)$/);
     if (m && method === "PATCH") {
       const body = await readBody(req);
+      // Another agent may file this one into a sidebar section, and that
+      // is all: every other field is the agent's own, or the person's.
+      if (asAgent && asAgent.botId !== m[1]) {
+        const other = Object.keys(body ?? {}).filter((key) => key !== "section");
+        if (body?.section === undefined || other.length) {
+          return json(res, 403, { error: "an agent can change only the section of another agent" });
+        }
+      }
       // Hiding is how an agent leaves the list, and archiving now moves
       // with it. PATCH /api/bots/:me is on the agent allowlist, so
       // without this an agent could take itself off its own routines and

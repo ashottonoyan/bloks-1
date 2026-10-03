@@ -50,6 +50,9 @@ export interface AgentNote {
 export interface Message {
   /** Between two agents rather than with the person. */
   agent?: AgentNote;
+  /** Said in this agent's own chat in a turn another agent's message
+   * started: shown in full, with a link to the exchange. Not sent to it. */
+  afterAgent?: { peerId: string; peerName: string };
   /** The user's selection on a decision component. */
   decisionChoice?: number;
   /** Sent while the lane was busy; drains into the next turn. */

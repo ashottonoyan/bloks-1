@@ -4,11 +4,15 @@
 // agents, and it used to arrive as big right-aligned bubbles that looked
 // exactly like the person's own words, while what the manager sent out
 // left no trace in its chat at all. Now each one is a small attributed
-// row: "Message from QA", "Messaged Engineer", "Replied to QA". The words
-// are a click away, and any row opens the whole two-agent exchange, both
-// directions, with the conversation each message sits in. Questions and
-// approval cards are other kinds of message, so they stay full size
-// whoever asks.
+// row: "Message from QA", "Messaged Engineer". The words are a click
+// away, and either row opens the whole two-agent exchange, both
+// directions, with the conversation each message sits in.
+//
+// What an agent then says in its own chat is not one of these. It reached
+// nobody but the person (an agent answers another with \`bloks say\`), and
+// it may well be a question for them, so it stays a full message with a
+// small "after a message from QA" link above it. Compacting it as
+// "Replied to QA" claimed a delivery that never happened.
 import { useEffect, useRef, useState } from "react";
 import ArrowDownLeft from "lucide-react/dist/esm/icons/arrow-down-left.mjs";
 import ArrowUpRight from "lucide-react/dist/esm/icons/arrow-up-right.mjs";
@@ -51,8 +55,8 @@ export function AgentExchangeRow({
   const note = message.agent!;
   const peer = state.bots.find((b) => b.id === note.peerId);
   const name = peer?.name ?? note.peerName;
-  const label = note.dir === "in" ? `Message from ${name}` : note.dir === "out" ? `Messaged ${name}` : `Replied to ${name}`;
-  const Icon = note.dir === "in" ? ArrowDownLeft : note.dir === "out" ? ArrowUpRight : CornerDownRight;
+  const label = note.dir === "in" ? `Message from ${name}` : `Messaged ${name}`;
+  const Icon = note.dir === "in" ? ArrowDownLeft : ArrowUpRight;
   const failed = note.status === "failed";
   const preview = (message.text ?? "").replace(/\s+/g, " ").trim();
   return (
@@ -70,6 +74,26 @@ export function AgentExchangeRow({
         )}
         {preview && <span className="min-w-0 truncate">{preview}</span>}
         {message.at ? <span className="shrink-0 tabular-nums text-muted-foreground/70">{formatTime(message.at)}</span> : null}
+      </button>
+    </div>
+  );
+}
+
+/** Above a full reply written in a turn another agent started: what
+ * prompted it, and the way to the exchange. Says nothing about delivery,
+ * because there was none. */
+export function AfterAgentLink({ peerId, peerName, onOpen }: { peerId: string; peerName: string; onOpen: () => void }) {
+  const { state } = useStore();
+  const name = state.bots.find((b) => b.id === peerId)?.name ?? peerName;
+  return (
+    <div className="mb-1 flex justify-start">
+      <button
+        onClick={onOpen}
+        title="Open the exchange"
+        className="flex items-center gap-1 rounded-md px-1 text-[11.5px] text-muted-foreground transition-colors duration-150 hover:text-foreground"
+      >
+        <CornerDownRight size={11} className="shrink-0" />
+        After a message from {name}
       </button>
     </div>
   );
@@ -147,7 +171,8 @@ export function AgentExchangeDialog({
                   <div className="mb-1 flex items-center gap-2 text-[12px] text-muted-foreground">
                     {who && <AgentAvatar bot={who} size={16} />}
                     <span className="font-medium text-foreground">{entry.fromName}</span>
-                    <span>to {entry.toName}</span>
+                    {/* context, not a message: it stayed in the speaker's own chat */}
+                    <span>{entry.dir === "reply" ? `in its own chat, not sent to ${entry.toName}` : `to ${entry.toName}`}</span>
                     {entry.status === "failed" && <span className="text-destructive">not delivered</span>}
                     <span className="ml-auto shrink-0 tabular-nums">{formatTime(entry.at)}</span>
                   </div>

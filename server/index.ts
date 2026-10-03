@@ -1279,12 +1279,13 @@ bus.subscribe((event: RuntimeEvent) => {
         // so an API model can answer with a chart like anybody else.
         const { components, text } = extractComponents(afterPlan);
         const answering = inRoom ? undefined : replyingTo.get(event.threadId);
+        if (answering && text) spokeInTurn.add(event.threadId);
         if (text) {
           pushMessage({
             role: "bot",
             kind: "text",
             text: houseStyle(text),
-            ...(answering ? { agent: { dir: "reply" as const, ...answering } } : {}),
+            ...(answering ? { afterAgent: answering } : {}),
           });
         }
         for (const component of components) {
@@ -1757,7 +1758,14 @@ bus.subscribe((event: RuntimeEvent) => {
       if (mailQueue.length) setTimeout(() => void drainMail(), 0);
       // whatever the agent was given to act with is spent
       agentTokens.revokeTask(event.threadId);
-      if (bot.tasks.some((t) => t.id === event.threadId)) store.markLane(bot.id, event.threadId, true);
+      // A turn another agent started that ended well without a word to
+      // the person leaves nothing to read; anything else marks the chat.
+      const quietAgentTurn =
+        replyingTo.has(event.threadId) && event.ok !== false && !spokeInTurn.has(event.threadId);
+      spokeInTurn.delete(event.threadId);
+      if (quietAgentTurn) {
+        // nothing new here
+      } else if (bot.tasks.some((t) => t.id === event.threadId)) store.markLane(bot.id, event.threadId, true);
       else store.patchBot(bot.id, { unread: true });
       broadcast({ kind: "bot", bot: clientBot(store.bot(bot.id)) });
       // A routine's run ends where its turn does, and its summary is
@@ -3502,9 +3510,13 @@ async function dispatchRound(
   }
 }
 
-/** Lanes whose running turn answers a message from another agent, so
- * what it says is marked as that exchange's reply (see AgentNote). */
+/** Lanes whose running turn was started by another agent's message, so
+ * what it says carries that context (Message.afterAgent). */
 const replyingTo = new Map<string, { peerId: string; peerName: string }>();
+/** Lanes whose agent-started turn said something in the chat. One that
+ * finished without a word has nothing for the person to read, so it does
+ * not mark the conversation unread. */
+const spokeInTurn = new Set<string>();
 
 /** Conversations an agent asked to close from inside its own turn there.
  * A lane cannot close while it is working, and the agent asking is the
@@ -7801,9 +7813,11 @@ const server = createServer(async (req, res) => {
     }
 
     // Everything two agents said to each other, from both sides, oldest
-    // first: what arrived in each one's chat, what each answered in the
-    // turn it started, and any send that never arrived. Each entry names
-    // the conversation it sits in, so unrelated work stays told apart.
+    // first: what arrived in each one's chat and any send that never
+    // arrived, plus, as context marked "reply", what each said in its own
+    // chat in a turn the other's message started (never sent to them).
+    // Each entry names the conversation it sits in, so unrelated work
+    // stays told apart.
     m = path.match(/^\/api\/bots\/([\w-]+)\/exchange\/([\w-]+)$/);
     if (m && method === "GET") {
       const a = store.bot(m[1]);
@@ -7813,7 +7827,10 @@ const server = createServer(async (req, res) => {
       for (const [self, other] of [[a, b], [b, a]] as const) {
         for (const lane of self.tasks) {
           for (const msg of store.messagesFor(lane.id)) {
-            const note = msg.agent;
+            // what an agent said in its own chat after the other's message
+            // is context, listed as such: it was never sent to them
+            const note =
+              msg.agent ?? (msg.afterAgent ? { dir: "reply" as const, ...msg.afterAgent } : undefined);
             if (!note || note.peerId !== other.id || msg.deleted) continue;
             // a send that arrived is listed once, from the side it arrived on
             if (note.dir === "out" && note.status !== "failed") continue;

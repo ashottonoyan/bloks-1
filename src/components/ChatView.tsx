@@ -21,7 +21,7 @@ import { useLanesInSidebar } from "@/lib/conversationsView";
 import { findHits, stepHit } from "@/lib/find";
 import { attachmentBasename, splitAttachments } from "@/lib/attachments";
 import { TaskStrip } from "./TaskStrip";
-import { AgentExchangeDialog, AgentExchangeRow } from "./AgentExchange";
+import { AfterAgentLink, AgentExchangeDialog, AgentExchangeRow } from "./AgentExchange";
 import { CallButton } from "./Voice";
 import { ArtifactCard } from "./Artifacts";
 import { ConnectorCard } from "./ConnectorCard";
@@ -910,7 +910,9 @@ export function ChatView({ bot }: { bot: Bot }) {
             if (m.deleted) return <TakenBack key={m.id} user={m.role === "user"} />;
             // to or from another agent: a compact row, not a bubble that
             // looks like the person's own words
-            if (m.agent && (m.kind === "text" || m.kind === "activity")) {
+            // A reply the agent wrote in its own chat is never compacted,
+            // whoever started the turn (older ones were marked dir "reply").
+            if (m.agent && m.agent.dir !== "reply" && (m.kind === "text" || m.kind === "activity")) {
               return (
                 <div key={m.id} data-msg-index={absolute}>
                   <AgentExchangeRow
@@ -959,9 +961,19 @@ export function ChatView({ bot }: { bot: Bot }) {
                 return <SecretCard key={m.id} botId={bot.id} message={m} />;
               case "changes":
                 return <ChangesCard key={m.id} message={m} fresh={fresh} />;
-              default:
+              default: {
+                // context for a reply in a turn another agent started: what
+                // prompted it, a click from the exchange, and nothing more
+                const after = m.afterAgent ?? (m.agent?.dir === "reply" ? m.agent : undefined);
                 return (
                   <div key={m.id} data-msg-index={absolute}>
+                  {after && (
+                    <AfterAgentLink
+                      peerId={after.peerId}
+                      peerName={after.peerName}
+                      onOpen={() => setExchange({ peerId: after.peerId, messageId: m.id, text: m.text ?? "" })}
+                    />
+                  )}
                   <Bubble
                     message={m}
                     fresh={fresh}
@@ -978,6 +990,7 @@ export function ChatView({ bot }: { bot: Bot }) {
                   />
                   </div>
                 );
+              }
             }
           })}
           {provisioning && (

@@ -77,10 +77,11 @@ export interface OptionCardData {
 }
 
 /** A message between two agents, as it shows in either agent's chat.
- * "in" is one that arrived from another agent, "out" is the sender's
- * own record of sending it, and "reply" is what the recipient answered
- * in the turn that message started. The person's chat shows these as
- * compact rows, and the whole exchange opens from any of them. */
+ * "in" is one that arrived from another agent and "out" is the sender's
+ * own record of sending it; the person's chat shows these as compact
+ * rows, and the whole exchange opens from either. "reply" is only found
+ * on messages written by 2.5.14 to 2.5.16, which marked what an agent
+ * said in a turn another agent started; that is `afterAgent` now. */
 export interface AgentNote {
   dir: "in" | "out" | "reply";
   peerId: string;
@@ -92,6 +93,11 @@ export interface AgentNote {
 export interface Message {
   /** Between two agents rather than with the person; see AgentNote. */
   agent?: AgentNote;
+  /** Said in this agent's own chat during a turn another agent's message
+   * started. Context only: it was not sent to that agent (an agent does
+   * that with \`bloks say\`), so it is shown in full like any reply, with
+   * a link to the exchange, and never as a message between them. */
+  afterAgent?: { peerId: string; peerName: string };
   /** Set on a room message that was said in the room's linked chat
    * channel, so the bridge does not say it there a second time. */
   via?: "slack" | "discord" | "whatsapp" | "watcher" | "email";

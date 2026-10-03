@@ -26,17 +26,19 @@ let input = "";
 process.stdin.on("data", (c) => (input += c));
 process.stdin.on("end", async () => {
   appendFileSync(${JSON.stringify(heard)}, JSON.stringify(input) + "\\n");
-  const ping = input.match(/PING ([\\w-]+)/);
+  const ping = input.match(/PING ([\\w-]+)( QUIET)?/);
   let answer = "Got it, on it.";
   if (ping) {
     await fetch(process.env.BLOKS_URL + "/api/bots/" + ping[1] + "/messages", {
       method: "POST",
       headers: { authorization: "Bearer " + process.env.BLOKS_TOKEN, "content-type": "application/json" },
-      body: JSON.stringify({ text: "Please run the release checks." }),
+      body: JSON.stringify({ text: ping[2] ? "Nothing to say back, just do it." : "Please run the release checks." }),
     });
     answer = "Asked QA.";
   }
-  console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: answer }] } }));
+  // told there is nothing to say back, the turn ends without a word
+  if (input.includes("Nothing to say back")) answer = "";
+  if (answer) console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: answer }] } }));
   console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: answer }));
 });
 `,
@@ -84,11 +86,16 @@ process.stdin.on("end", async () => {
   assert.match(told ?? "", /A message from Manager, another agent/);
   assert.match(told ?? "", new RegExp(`bloks say ${manager.id}`));
 
-  // QA's answer belongs to that exchange
-  const reply = await until(async () => (await messages(qa)).find((m) => m.agent?.dir === "reply"));
-  assert.ok(reply, "QA's answer was not marked as the exchange's reply");
-  assert.equal(reply.text, "Got it, on it.");
-  assert.equal(reply.agent.peerId, manager.id);
+  // What QA says in its own chat is a full reply for the person, never a
+  // message to Manager: it carries the context, not the agent field that
+  // makes a compact "message between agents" row (#123).
+  const reply = await until(async () => (await messages(qa)).find((m) => m.text === "Got it, on it."));
+  assert.ok(reply, "QA's reply never showed up");
+  assert.equal(reply.agent, undefined, "an unsent reply was marked as a message between agents");
+  assert.deepEqual(reply.afterAgent, { peerId: manager.id, peerName: "Manager" });
+  // and a reply is something to read
+  const qaLane = async () => (await h.json("/api/bots")).bots.find((b: any) => b.id === qa.id).tasks[0];
+  assert.equal((await until(async () => ((await qaLane()).unread ? true : undefined))) ?? false, true);
 
   // Manager's chat keeps a record of sending it, and whether it went
   const sent = await until(async () => (await messages(manager)).find((m) => m.agent?.dir === "out"));
@@ -111,4 +118,22 @@ process.stdin.on("end", async () => {
   assert.equal(exchange[0].laneTitle, "General");
   const mirrored = await h.json(`/api/bots/${qa.id}/exchange/${manager.id}`);
   assert.equal(mirrored.messages.length, 2);
+
+  // A turn another agent started that ends without a word to the person
+  // leaves nothing to read, so the chat is not marked unread.
+  await h.fetch(`/api/bots/${qa.id}/tasks/${lane(qa)}`, { method: "PATCH", body: JSON.stringify({ unread: false }) });
+  const idle = async (bot: any) => {
+    for (let i = 0; i < 200; i++) {
+      if (!(await h.json("/api/bots")).bots.find((b: any) => b.id === bot.id).busy) return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  };
+  await idle(qa);
+  await idle(manager);
+  await h.fetch(`/api/bots/${manager.id}/messages`, { method: "POST", body: JSON.stringify({ text: `PING ${qa.id} QUIET` }) });
+  const quiet = await until(async () => (await messages(qa)).find((m) => m.text === "Nothing to say back, just do it."));
+  assert.ok(quiet, "the second message never arrived");
+  await new Promise((r) => setTimeout(r, 300));
+  await idle(qa);
+  assert.ok(!(await qaLane()).unread, "a silent agent-started turn marked the chat unread");
 });
